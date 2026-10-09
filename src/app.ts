@@ -8,7 +8,7 @@ import { submitInTx } from "./db/repositories/game.repository.ts";
 import { rematchInTx } from "./db/repositories/rematch.repository.ts";
 import { ApiError, err, newInviteCode, hashToken, newSessionToken, newPlayerId, newGameId, newRoundId } from "./utils/errors.ts";
 import { emptySnapshot, getPlayerView, getRemainingNumbers, type Seat, type GameSnapshot } from "./domain/game/engine.ts";
-import { homeView, lobbyView, gameView, resultView, errorView, layout } from "./views/index.tsx";
+import { homeView, lobbyView, gameView, resultView, errorView, layout, esc } from "./views/index.ts";
 import { registerWsGateway } from "./ws/gateway.ts";
 import { z } from "zod";
 
@@ -143,7 +143,7 @@ export function createApp() {
 
   app.get("/health", (c) => c.json({ ok: true, ts: Date.now() }));
 
-  app.use("/static/*", serveStatic({ root: "./public" }));
+  app.use("/static/*", serveStatic({ root: "./public", rewriteRequestPath: (p: string) => p.replace("/static", "") }));
 
   // ---- pages ----
   app.get("/", (c) => c.html(layout("number-duel", homeView())));
@@ -155,10 +155,10 @@ export function createApp() {
     const ag = rooms.activeGame(room.id);
     const players = rooms.players(room.id);
     if (ag && ag.snapshot && room.status === "PLAYING") {
-      return c.html(layout("game", gameView({ code, nicknames: players.map(p => p.nickname) })));
+      return c.html(layout("game", gameView(code, players.map(p => p.nickname))));
     }
-    if (room.status === "FINISHED") return c.html(layout("result", resultView({})));
-    return c.html(layout("lobby", lobbyView({ code, nicknames: players.map(p => p.nickname) })));
+    if (room.status === "FINISHED") return c.html(layout("result", resultView(code)));
+    return c.html(layout("lobby", lobbyView(code, players.map(p => p.nickname))));
   });
 
   return app;
