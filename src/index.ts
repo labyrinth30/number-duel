@@ -55,6 +55,12 @@ wsApp.get("/ws", upgradeWebSocket((c) => {
 }));
 app.route("/", wsApp);
 
+// 주기 cleanup — 60분마다
+import { cleanupStaleRooms } from "./jobs/cleanup.ts";
+setInterval(() => {
+  try { const n = cleanupStaleRooms(db); if (n) console.log(`cleanup: removed ${n} stale rooms`); } catch (e) { console.error("cleanup err", e); }
+}, 60 * 60 * 1000).unref();
+
 const server = Bun.serve({
   port: config.port,
   hostname: config.bindHost,
