@@ -5,6 +5,7 @@ import { openDb, migrate } from "./db/client.ts";
 import { config } from "./config/env.ts";
 import { RoomRepository } from "./db/repositories/room.repository.ts";
 import { submitInTx } from "./db/repositories/game.repository.ts";
+import { rematchInTx } from "./db/repositories/rematch.repository.ts";
 import { ApiError, err, newInviteCode, hashToken, newSessionToken, newPlayerId, newGameId, newRoundId } from "./utils/errors.ts";
 import { emptySnapshot, getPlayerView, getRemainingNumbers, type Seat, type GameSnapshot } from "./domain/game/engine.ts";
 import { homeView, lobbyView, gameView, resultView, errorView, layout } from "./views/index.tsx";
@@ -107,27 +108,38 @@ export function createApp() {
     return c.json({ gameId: g.id }, 201, { "Cache-Control": "no-store" });
   });
 
+  // rest submit endpoint (HTTP fallback; 게임은 WS 권장)
   app.post("/api/game/:gameId/submit", async (c) => {
     const gameId = c.req.param("gameId");
     const body = await c.req.parseBody().catch(() => { throw err("OUT_OF_RANGE"); });
     const number = Number(body.number);
-    // 검증: 세션과 seat
-    const ag = rooms.activeGame((db.query(`SELECT room_id FROM games WHERE id=?`).get(gameId) as { room_id: string }).room_id);
-    if (!ag) throw err("GAME_FINISHED");
-    // seat 자체는 activeGame의 game room rooms.players로부터 판정
-    // 단 여기는 간단화: room의 두 player. 플레이어 찾기
-    const sessIdx = (rooms.byTokenHash(hashToken(sessionCookieToken(c) ?? ""))) ?? null;
-    // ↑ 세션 관련 코드는 이후 정리 필요
-    return c.json({ ok: false }, 400);
+    const g = db.query(`SELECT room_id FROM games WHERE id=?`).get(gameId) as { room_id: string } | null;
+    if (!g) throw err("GAME_FINISHED");
+    const sess = sessionFor(c, g.room_id, "A");
+    const sessB = sessionFor(c, g.room_id, "B");
+    const cur = sess ?? sessB;
+    if (!cur) throw err("UNAUTHORIZED");
+    const p = rooms.players(g.room_id).find(x => x.session_token_hash === cur.tokenHash);
+    if (!p) throw err("FORBIDDEN");
+    const out = submitInTx(db, gameId, p.seat, number);
+    return c.json({ ok: true, resolved: out.resolved, stateVersion: out.stateVersion }, 200, { "Cache-Control": "no-store" });
   });
 
-  function sessionCookieToken(c: any): string | undefined {
-    const h = c.req.header("Cookie") ?? "";
-    for (const part of h.split(";")) {
-      const [k, ...r] = part.trim().split("=");
-      if (k === "nd_token") return r.join("=");
-    }
-  }
+  // rematch (HTTP)
+  app.post("/api/game/rematch", async (c) => {
+    const body = await c.req.parseBody().catch(() => { throw err("BAD_NICKNAME"); });
+    const code = String(body.code || "");
+    const room = rooms.byInvite(code);
+    if (!room) throw err("ROOM_NOT_FOUND");
+    const sessA = sessionFor(c, room.id, "A");
+    const sessB = sessionFor(c, room.id, "B");
+    const cur = sessA ?? sessB;
+    if (!cur) throw err("UNAUTHORIZED");
+    const p = rooms.players(room.id).find(x => x.session_token_hash === cur.tokenHash);
+    if (!p) throw err("FORBIDDEN");
+    const r = rematchInTx(db, room.id, p.seat);
+    return c.json({ ok: true, ...r }, 200, { "Cache-Control": "no-store" });
+  });
 
   app.get("/health", (c) => c.json({ ok: true, ts: Date.now() }));
 
