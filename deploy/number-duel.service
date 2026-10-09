@@ -1,0 +1,19 @@
+[Unit]
+Description=number-duel (1:1 숫자 심리전 웹게임)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/number-duel
+ExecStart=/home/ubuntu/.bun/bin/bun src/index.ts
+Restart=on-failure
+RestartSec=5
+Environment=PORT=3130
+Environment=BIND_HOST=127.0.0.1
+Environment=DB_PATH=/home/ubuntu/number-duel/data/game.sqlite
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
