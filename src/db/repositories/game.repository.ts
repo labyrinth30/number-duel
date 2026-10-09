@@ -45,9 +45,10 @@ export function submitInTx(
           throw new ApiError(403, "FORBIDDEN", "FORBIDDEN");
       }
       const row = db
-        .query("SELECT snapshot FROM game_state WHERE game_id=?")
-        .get(gameId) as { snapshot: string };
+        .query("SELECT snapshot, initial_first_submitter FROM game_state WHERE game_id=?")
+        .get(gameId) as { snapshot: string; initial_first_submitter: Seat | null };
       const snap: GameSnapshot = JSON.parse(row.snapshot);
+      snap.initialFirstSubmitter ??= row.initial_first_submitter;
       if (isIncompatibleLegacy(snap))
         throw new ApiError(
           409,
@@ -115,8 +116,9 @@ export function submitInTx(
               .get(g.room_id, snap.winner) as { id: string }
           ).id
         : null;
-      db.query("UPDATE game_state SET snapshot=? WHERE game_id=?").run(
+      db.query("UPDATE game_state SET snapshot=?,initial_first_submitter=? WHERE game_id=?").run(
         JSON.stringify(snap),
+        snap.initialFirstSubmitter ?? null,
         gameId,
       );
       db.query(

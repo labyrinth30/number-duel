@@ -34,6 +34,7 @@ test("submitted tile cannot change and used tiles cannot be reused next round", 
     ok: false,
     code: "NUMBER_USED",
   });
+  recordNumber(snapshot, "B", 6);
   expect(validateMove({ seat: "A", number: 4, snapshot })).toMatchObject({
     ok: true,
     setNo: 1,

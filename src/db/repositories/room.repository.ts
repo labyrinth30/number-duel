@@ -161,14 +161,16 @@ export class RoomRepository {
     if (!g) return null;
     const gs = this.db
       .query(
-        `SELECT snapshot, rematch_a, rematch_b FROM game_state WHERE game_id=?`,
+        `SELECT snapshot, initial_first_submitter, rematch_a, rematch_b FROM game_state WHERE game_id=?`,
       )
       .get(g.id) as {
       snapshot: string;
+      initial_first_submitter: "A" | "B" | null;
       rematch_a: number;
       rematch_b: number;
     } | null;
     const snap = gs ? JSON.parse(gs.snapshot) : null;
+    if (snap) snap.initialFirstSubmitter ??= gs?.initial_first_submitter ?? null;
     if (snap && isIncompatibleLegacy(snap))
       throw new ApiError(
         409,

@@ -111,7 +111,7 @@
       const own = round?.myNumber ?? (active ? current.myNumber ?? selected : null);
       const other = round?.opponentParity ?? (active ? current.opponentParity : null);
       const badge = round?.outcome != null ? outcome(round.outcome) : null;
-      return `<li data-round="${i + 1}" class="history-cell ${active ? "active-round" : ""}" aria-label="${i + 1}라운드"><span class="round-label">R${i + 1}</span><div class="tile-slot opponent-slot"><span class="record-tile ${other ?? "empty"}"><span class="history-parity">${other ? (other === "odd" ? "홀" : "짝") : "?"}</span><small>${other ? (other === "odd" ? "홀수" : "짝수") : "비공개"}</small></span></div><span class="badge ${badge?.[0] ?? "pending"}"><i class="led" aria-hidden="true"></i>${badge ? badge[1].split(" ")[0] : active ? "진행" : "대기"}</span><div class="tile-slot own-slot"><span class="record-tile ${own != null ? (own % 2 ? "odd" : "even") : "empty"}"><strong class="history-number">${own ?? "?"}</strong><small>${own != null ? (round?.myNumber != null || current?.myNumber != null && active ? "✓ 제출" : "선택됨·<br>미제출") : "미제출"}</small></span></div></li>`;
+      return `<li data-round="${i + 1}" class="history-cell ${active ? "active-round" : ""}" aria-label="${i + 1}라운드"><span class="round-label">R${i + 1}</span><div class="tile-slot opponent-slot"><span class="record-tile ${other ?? "empty"}"><span class="history-parity">${other ? (other === "odd" ? "홀" : "짝") : "?"}</span>${other ? "" : "<small>비공개</small>"}</span></div><span class="badge ${badge?.[0] ?? "pending"}"><i class="led" aria-hidden="true"></i>${badge ? badge[1].split(" ")[0] : active ? "진행" : "대기"}</span><div class="tile-slot own-slot"><span class="record-tile ${own != null ? (own % 2 ? "odd" : "even") : "empty"}"><strong class="history-number">${own ?? "?"}</strong><small>${own != null ? (round?.myNumber != null || current?.myNumber != null && active ? "✓ 제출" : "선택됨·<br>미제출") : "미제출"}</small></span></div></li>`;
     }).join("")}</ol><p class="legend">홀수 = 흰 타일 · 짝수 = 검은 타일 · 칸은 라운드 순서</p></section>`;
     const scores = `<div class="round-heading">ROUND <strong>${view.roundNo}</strong> / 9</div><div class="scores"><div>상대<strong>${view.opponentRoundWins}</strong></div><span>라운드 승수</span><div>나<strong>${view.myRoundWins}</strong></div></div>`;
     const lastResult = `<div id="lastResult" class="last-result ${result?.[0] ?? "pending"}" role="status" aria-live="polite">${result ? `직전 결과 · ${last.roundNo}라운드 · ${result[1]}` : "첫 라운드를 시작해 주세요"}</div>`;
@@ -122,13 +122,15 @@
       return;
     }
     const submitted = current.myNumber !== null;
-    el.innerHTML = `${scores}<section class="arena" aria-label="현재 라운드"><div class="opponent"><span class="player-label">상대</span><div id="opponentParity" class="arena-value">${parity(current.opponentParity)}</div><p>${current.opponentParity ? "✓ 제출 완료" : "숫자 선택 중 · 미제출"}</p></div><span class="versus">VS</span><div class="self"><span class="player-label">나</span><div class="arena-value own-value">${submitted ? current.myNumber : selected ?? "?"}</div><p>${submitted ? "✓ 제출 완료 · 상대 대기" : selected !== null ? "선택됨·미제출" : "숫자를 선택해 주세요"}</p></div></section>${lastResult}<section class="selection"><h2>내 숫자 선택</h2><div class="number-grid">${Array.from({length:9},(_, i) => {
+    const waiting = !view.canSubmit && !submitted;
+    const waitText = view.turnStatus === "MIGRATION_REQUIRED" ? "첫 제출 기록이 없어 운영자 확인이 필요합니다. 기록은 보존됩니다." : rounds.some((round) => round.outcome === "A" || round.outcome === "B") ? "직전 승자의 선제출을 기다리는 중입니다. 무승부는 이전 순서를 유지합니다." : "첫 라운드의 첫 제출자가 먼저 제출할 때까지 기다려 주세요.";
+    el.innerHTML = `${scores}<section class="arena" aria-label="현재 라운드"><div class="opponent"><span class="player-label">상대</span><div id="opponentParity" class="arena-value">${parity(current.opponentParity)}</div><p>${current.opponentParity ? "✓ 제출 완료" : "숫자 선택 중 · 미제출"}</p></div><span class="versus">VS</span><div class="self"><span class="player-label">나</span><div class="arena-value own-value">${submitted ? current.myNumber : selected ?? "?"}</div><p>${submitted ? "✓ 제출 완료 · 상대 대기" : selected !== null ? "선택됨·미제출" : "숫자를 선택해 주세요"}</p></div></section>${lastResult}${waiting ? `<p id="turnWaiting" role="status">${waitText}</p>` : ""}<section class="selection"><h2>내 숫자 선택</h2><div class="number-grid">${Array.from({length:9},(_, i) => {
       const number = i + 1, used = !view.myRemaining.includes(number);
-      return `<button class="n-btn ${number % 2 ? "odd" : "even"} ${selected === number ? "selected" : ""}" data-n="${number}" aria-pressed="${selected === number}" aria-label="${number}${used ? ' 사용 완료' : ' 선택'}" ${used || submitted || busy ? "disabled" : ""}><strong>${number}</strong><span>${used ? "사용 완료" : number % 2 ? "홀수" : "짝수"}</span></button>`;
-    }).join("")}</div><button id="confirmBtn" class="btn confirm" ${selected === null || submitted || busy ? "disabled" : ""}>${busy ? "제출 중…" : submitted ? "제출 완료 · 상대 대기" : selected !== null ? `${selected} 제출 확정` : "숫자 선택 후 제출 확정"}</button></section>${history}<details class="help"><summary>선택 도움말 ?</summary><p>숫자를 고른 뒤 제출 확정을 누르세요. 확정 전에는 바꿀 수 있습니다. 사용한 숫자는 다시 선택할 수 없습니다.</p></details>`;
+      return `<button class="n-btn ${number % 2 ? "odd" : "even"} ${selected === number ? "selected" : ""}" data-n="${number}" aria-pressed="${selected === number}" aria-label="${number}${used ? ' 사용 완료' : ' 선택'}" ${used || submitted || waiting || busy ? "disabled" : ""}><strong>${number}</strong><span>${used ? "사용 완료" : number % 2 ? "홀수" : "짝수"}</span></button>`;
+    }).join("")}</div><button id="confirmBtn" class="btn confirm" ${selected === null || submitted || waiting || busy ? "disabled" : ""}>${waiting ? "선제출 대기 중" : busy ? "제출 중…" : submitted ? "제출 완료 · 상대 대기" : selected !== null ? `${selected} 제출 확정` : "숫자 선택 후 제출 확정"}</button></section>${history}<details class="help"><summary>선택 도움말 ?</summary><p>숫자를 고른 뒤 제출 확정을 누르세요. 확정 전에는 바꿀 수 있습니다. 사용한 숫자는 다시 선택할 수 없습니다.</p></details>`;
     el.querySelectorAll(".n-btn").forEach((button) => {
       button.onclick = () => {
-        if (busy || submitted || !view.myRemaining.includes(Number(button.dataset.n))) return;
+        if (busy || submitted || waiting || !view.myRemaining.includes(Number(button.dataset.n))) return;
         selected = Number(button.dataset.n);
         render();
         el.querySelector(`[data-n="${selected}"]`)?.focus();
@@ -137,7 +139,7 @@
     const restoreFocus = focusNumber ? el.querySelector(`[data-n="${focusNumber}"]`) : focusId ? document.getElementById(focusId) : null;
     if (restoreFocus && !restoreFocus.disabled) restoreFocus.focus({ preventScroll: true });
     document.getElementById("confirmBtn").onclick = () => {
-      if (selected === null || submitted || busy) return;
+      if (selected === null || submitted || waiting || busy) return;
       action("submit", { gameId: state.gameId, setNo: String(view.setNo), roundNo: String(view.roundNo), requestId: crypto.randomUUID(), number: String(selected) });
     };
   }

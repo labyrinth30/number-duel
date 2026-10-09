@@ -21,6 +21,7 @@ export interface SetState {
   bScore: number;
 }
 export interface GameSnapshot {
+  initialFirstSubmitter?: Seat | null;
   sets: SetState[];
   finished: boolean;
   winner: Seat | null;
@@ -31,6 +32,24 @@ export const ROUNDS_PER_GAME = 9;
 
 export const NUM_MIN = 1;
 export const NUM_MAX = 9;
+
+/** Saved acceptance order, never client timestamps. Missing legacy history is blocked. */
+export function submissionOrder(snapshot: GameSnapshot, seat: Seat) {
+  const rounds = snapshot.sets.at(-1)?.rounds ?? [];
+  const resolved = rounds.filter((r) => r.outcome !== null);
+  const decisive = resolved.findLast((r) => r.outcome === "A" || r.outcome === "B");
+  const requiredFirstSeat: Seat | null = decisive
+    ? decisive.outcome as Seat
+    : resolved.length ? snapshot.initialFirstSubmitter ?? null : null;
+  const migrationBlocked = resolved.length > 0 && !decisive && !requiredFirstSeat;
+  const open = rounds.at(-1)?.outcome === null ? rounds.at(-1)! : null;
+  const submitted = open ? (seat === "A" ? open.aNumber : open.bNumber) !== null : false;
+  const firstSubmitted = requiredFirstSeat === "A" ? open?.aNumber != null : requiredFirstSeat === "B" ? open?.bNumber != null : false;
+  const canSubmit = !snapshot.finished && !migrationBlocked && !submitted &&
+    (!requiredFirstSeat || requiredFirstSeat === seat || firstSubmitted);
+  const turnStatus = snapshot.finished ? "FINISHED" : migrationBlocked ? "MIGRATION_REQUIRED" : submitted ? "SUBMITTED" : canSubmit ? "READY" : "WAITING_FIRST";
+  return { requiredFirstSeat, canSubmit, turnStatus };
+}
 
 // ---------------- validateMove ----------------
 export interface MoveInput {
@@ -86,6 +105,11 @@ export function validateMove(input: MoveInput): MoveCheck | MoveError {
       message: "숫자는 1부터 9까지야.",
     };
   }
+  const order = submissionOrder(snapshot, seat);
+  if (order.turnStatus === "MIGRATION_REQUIRED")
+    return { ok: false, code: "LEGACY_SUBMISSION_ORDER_UNKNOWN", message: "Original first submitter is unknown; owner migration review required." };
+  if (!order.canSubmit)
+    return { ok: false, code: "WAITING_FIRST_SUBMISSION", message: "Wait for the prior winner to submit first." };
   return { ok: true, setNo: curSet.setNo, roundNo };
 }
 
@@ -137,6 +161,7 @@ function makeSet(setNo: number): SetState {
 
 export function emptySnapshot(): GameSnapshot {
   return {
+    initialFirstSubmitter: null,
     sets: [makeSet(1)],
     finished: false,
     winner: null,
@@ -184,6 +209,7 @@ export function recordNumber(
   const field = seat === "A" ? "aNumber" : "bNumber";
   if (round[field] !== null) throw new Error("ALREADY_SUBMITTED");
   round[field] = number;
+  if (round.roundNo === 1 && !snapshot.initialFirstSubmitter) snapshot.initialFirstSubmitter = seat;
 }
 
 /**
@@ -245,6 +271,9 @@ export interface SetView {
   winner: Seat | "DRAW" | null;
 }
 export interface PlayerView {
+  requiredFirstSeat: Seat | null;
+  canSubmit: boolean;
+  turnStatus: string;
   stateVersion: number;
   finished: boolean;
   winner: Seat | null;
@@ -312,6 +341,7 @@ export function getPlayerView(
       : null;
 
   return {
+    ...submissionOrder(snapshot, seat),
     stateVersion,
     finished: snapshot.finished,
     winner: snapshot.winner,

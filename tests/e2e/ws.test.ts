@@ -253,7 +253,49 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
     expect((await state(b)).view.current.opponentParity).toBe("odd");
     await expect(pb.locator("#opponentParity")).toContainText("홀수");
     for (let r = 1; r <= 9; r++) {
+      if (r === 2) {
+        await expect(pb.locator("#turnWaiting")).toContainText("직전 승자");
+        await expect(pb.locator('[data-n="1"]')).toBeDisabled();
+        await expect(pb.locator("#confirmBtn")).toBeDisabled();
+        const before = await state(b);
+        const blocked = await b.request.post(base + `/duel/api/rooms/${code}/submit`, {form: {gameId: initial.gameId, number: "1", setNo: "1", roundNo: "2", requestId: "blocked-http"}});
+        expect(blocked.status()).toBe(409);
+        expect((await blocked.json()).code).toBe("WAITING_FIRST_SUBMISSION");
+        const wsBlocked = await pb.evaluate(async (gameId) => await new Promise<string>((resolve, reject) => {
+          const w = new WebSocket(location.origin.replace("http", "ws") + "/duel/ws?roomCode=" + location.pathname.split("/").at(-1));
+          w.onopen = () => w.send(JSON.stringify({type:"game:submit", payload:{gameId, number:1, setNo:1, roundNo:2, requestId:"blocked-ws"}}));
+          w.onmessage = (e) => {const m = JSON.parse(e.data); if (m.type === "game:error") {w.close(); resolve(m.code);}};
+          setTimeout(() => {w.close(); reject(new Error("blocked WS timeout"));}, 5000);
+        }), initial.gameId);
+        expect(wsBlocked).toBe("WAITING_FIRST_SUBMISSION");
+        expect((await state(b)).view.stateVersion).toBe(before.view.stateVersion);
+        expect(before.view.current.opponentSubmitted).toBe(false);
+        expect(before.view.current.opponentParity).toBeNull();
+        // Restart while order is derived from a resolved winner, before its next submission.
+        proc!.kill(); await proc!.exited; await start(port);
+        await pa.reload(); await pb.reload();
+        expect((await state(b)).view.requiredFirstSeat).toBe("A");
+        expect((await state(b)).view.canSubmit).toBe(false);
+        await expect(pb.locator("#confirmBtn")).toBeDisabled();
+        mkdirSync("backups/turn-order-review", {recursive:true});
+        await pb.setViewportSize({width:390,height:844});
+        expect(await pb.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await expect(pb.locator("#rules")).not.toHaveAttribute("open", "");
+        await pb.screenshot({path:"backups/turn-order-review/mobile-turn-waiting.png",fullPage:true});
+      }
       if (r !== 1) await selectConfirm(pa, aa[r - 1]!);
+      if (r === 2) {
+        await expect(pb.locator('[data-n="1"]')).toBeEnabled();
+        await expect(pb.locator("#opponentParity")).toContainText("짝수");
+        await pb.locator('[data-n="1"]').click();
+        await expect(pb.locator("#confirmBtn")).toBeEnabled();
+        const confirmBox = await pb.locator("#confirmBtn").boundingBox();
+        expect(confirmBox!.width).toBeGreaterThanOrEqual(44);
+        expect(confirmBox!.height).toBeGreaterThanOrEqual(44);
+        expect(confirmBox!.y + confirmBox!.height).toBeLessThanOrEqual(844);
+        expect(await pb.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await pb.screenshot({path:"backups/turn-order-review/mobile-turn-enabled.png",fullPage:true});
+      }
       await selectConfirm(pb, bb[r - 1]!);
       await expect
         .poll(async () => {
@@ -271,8 +313,8 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
         await pa.reload();
         await expect(pa.locator("#lastResult")).toContainText("2라운드 · 승리");
         await pa.locator('[data-n="3"]').click();
-        await expect(pa.locator('#history [data-round="1"]')).toContainText("홀수");
-        await expect(pa.locator('#history [data-round="2"]')).toContainText("홀수");
+        await expect(pa.locator('#history [data-round="1"]')).toContainText("홀");
+        await expect(pa.locator('#history [data-round="2"]')).toContainText("홀");
         expect(await pa.locator('#history [data-round="1"] .history-number').textContent()).toBe("1");
         expect(await pa.locator('#history [data-round="2"] .history-number').textContent()).toBe("2");
         expect(await pa.locator(".opponent").textContent()).not.toMatch(/[1-9]/);
@@ -325,7 +367,7 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
         expect((await state(b)).view.sets[0].rounds[0].opponentParity).toBe(
           "odd",
         );
-        await expect(pb.locator("#history")).toContainText("홀수");
+        await expect(pb.locator("#history")).toContainText("홀");
       }
     }
     await pa.locator("#result").waitFor();
@@ -378,7 +420,8 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
         n % 2 ? "홀수" : "짝수",
       );
       await expect(pb.locator("body")).not.toContainText(/\b(?:ODD|EVEN)\b/i);
-      await expect(pb.locator(`#history [data-round="${n}"] .opponent-slot small`)).toHaveText(n % 2 ? "홀수" : "짝수");
+      await expect(pb.locator(`#history [data-round="${n}"] .opponent-slot .history-parity`)).toHaveText(n % 2 ? "홀" : "짝");
+      await expect(pb.locator(`#history [data-round="${n}"] .opponent-slot small`)).toHaveCount(0);
       await selectConfirm(pb, n);
       await expect
         .poll(async () => {
