@@ -7,7 +7,7 @@ import { RoomRepository } from "../../src/db/repositories/room.repository.ts";
 import { submitInTx } from "../../src/db/repositories/game.repository.ts";
 
 const tmpDir = () => mkdtempSync(join(tmpdir(), "duel-test-"));
-let db: InstanceType<typeof Database> | any, repo: RoomRepository, tmpPath: string;
+let db: import("bun:sqlite").Database, repo: RoomRepository, tmpPath: string;
 
 function freshDb() {
   tmpPath = join(tmpDir(), `t-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`);

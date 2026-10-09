@@ -1,73 +1,25 @@
 # number-duel
 
-1:1 숫자 심리전 웹게임 (1~9, 9라운드, 2세트 선승). 자세한 규칙은 [RULES.md](RULES.md).
+Two-player invitation game: exactly nine rounds, using each 1–9 tile once per match. Higher wins except 1 beats 9; equal tiles draw the round. Compare round win totals after round nine. Equal totals finish a DRAW match (our webgame custom policy, not a claimed official rule). A fresh rematch requires both players' consent. Opponent exact numbers remain private; opponent ODD/EVEN parity appears immediately upon submission and remains in round history. Own tiles, remaining numbers, and round scores are displayed. Blue ODD and yellow EVEN tiles include text labels.
 
-## 실행 (개발)
-
-```sh
-bun install
-bun src/index.ts       # PORT=3130, BIND_HOST=127.0.0.1, DB_PATH 데이터 경로
-bun test               # 테스트 (27개)
-```
-
-## 구조
-
-```
-src/
-  app.ts                 # Hono 앱 (REST + WS route view mount)
-  index.ts               # Bun.serve (WS websocket handler)
-  config/env.ts          # 환경변수
-  db/
-    client.ts            # SQLite open + WAL + schema
-    repositories/        # Room / Game repo
-  domain/game/
-    engine.ts            # 순수 게임 로직 (DB/HTTP/WS 미의존)
-  views/index.tsx        # Hono JSX 서버렌더
-  utils/errors.ts        # ApiError + 에러코드
-  ws/gateway.ts          # WS registry (room → sockets)
-public/
-  css/style.css
-  js/game.js             # 클라이언트 (WS 구독 + state render)
-deploy/
-  number-duel.service    # systemd 유닛
-  nginx-duel.conf        # nginx 서브패스 /duel/ 예시
-data/
-  game.sqlite            # DB (배포 시 절대경로 권장)
-tests/
-  unit/                  # 엔진 로직
-  integration/           # DB/트랜잭션/정원
-  e2e/                   # WebSocket 전체 흐름 (실측)
-```
-
-## API
-
-- `POST /api/rooms` — 방 생성 (닉네임)
-- `POST /api/rooms/:code/join` — 게스트 입장 (B 좌석)
-- `GET  /api/rooms/:code/state` — 플레이어 관점 상태
-- `POST /api/rooms/:code/start` — 호스트 게임 시작
-- `GET  /ws?roomCode=<code>&token=<token>` — WebSocket upgrade
-
-## WebSocket 메시지
-- 클라 → 서버: `game:submit`, `game:sync`, `ping`
-- 서버 → 클라: `game:state` (stateVersion), `game:error`, `pong`
-
-## 배포 (lokal 검증 후 실제 재시작은 유저 승인 요망)
-
-1. 백업: `sudo cp /etc/nginx/sites-available/apple-game /etc/nginx/sites-available/apple-game.bak.$(date +%s)`
-2. depoly/nginx-duel.conf 블록을 /etc/nginx/sites-available/apple-game의 server{}에 추가
-3. `sudo nginx -t && sudo systemctl reload nginx`
-4. systemd: `sudo cp deploy/number-duel.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now number-duel`
-5. 롤백: 백업 restores + `sudo systemctl disable --now number-duel`
-
-## 백업
+Use `/home/ubuntu/.bun/bin/bun`. Development defaults to loopback port 3130; use an isolated DB and `PORT=0` when testing. Browser paths use `/duel/`; the server accepts both prefixed requests and nginx's stripped paths.
 
 ```sh
-# SQLite는 WAL 모드라 안전한 파일 복사:
-sqlite3 /home/ubuntu/number-duel/data/game.sqlite ".backup /tmp/game-backup.sqlite"
+/home/ubuntu/.bun/bin/bun run typecheck
+/home/ubuntu/.bun/bin/bun test
+/home/ubuntu/.bun/bin/bun run build
 ```
 
-## 남은 이슈
+Tests create temporary or in-memory SQLite databases. Browser E2E starts its own loopback server on an OS-selected port, runs real Chromium with two separate contexts through a nine-round win and a nine-round draw, both results and consent rematches. It stops and restarts the test server against the same on-disk database and browser sessions during a partial round, proving saved submission and parity recovery. Install Chromium with `bun x playwright install chromium` if absent. No production server or database is used by tests.
 
-- game.js의 rematch endpoint는 부분 구현 (server side는 아직 미완성)
-- /duel/ws 경로의 실제 origin 검증에 Origin header 체크는 gateway.authenticate 후에 별도 verify 필요 (Phase 5에서 아직 부분)
-- 방 만료 cleanup job (24h) 미구현
+HTTP endpoints: create `/api/rooms`, join/start/state/submit/rematch under `/api/rooms/:code/`. Submit requires `gameId`, `setNo`, `roundNo`, `requestId`, and `number`. Rematch requires the finished `gameId`; both players consent. `/ws?roomCode=...` authenticates through HttpOnly cookies. WS submissions use the same identity fields. There are no session tokens in URLs or DTOs. WS sends state invalidations; clients fetch their private view. HTTP polling supplies fallback and recovery.
+
+Production cookies use HttpOnly, Secure, SameSite=Lax, Path=/duel/. Only SHA256 token hashes are stored. Set `NODE_ENV=production` and `PUBLIC_ORIGIN=https://labyrinth30.duckdns.org`; when unset, Origin is checked against request host/protocol, including nginx's HTTPS forwarded protocol. Keep binding to loopback. Legacy cookie names remain accepted after validating the token hash against room membership; new cookies use the full room ID.
+
+Source and consistent SQLite backups are under ignored `backups/20261009T112913Z/`. Database/WAL/SHM are removed from the git index only; their files remain in place. Existing production data has not been migrated or modified by this work; additive schema migration occurs on application startup.
+
+Deployment is deferred to parent review. Review the diff and test evidence, take another consistent SQLite backup immediately before rollout, then restart **only number-duel** using the existing service setup and installed Bun. Do not change nginx/systemd or restart other services. The existing nginx `/duel/` prefix stripping is supported. Confirm public HTTPS cookie attributes, WS upgrade, and two-browser gameplay after deployment. Live HTTPS/proxy behavior was not exercised during isolated tests. No commit or push has been made.
+
+Legacy compatibility: retain one internal set and submit `setNo=1`; user scores are round wins. Unfinished multi-set snapshots or unfinished matches whose internal set already ended return `LEGACY_GAME_INCOMPATIBLE` and remain preserved for owner review. No automatic reset/conversion occurs. Read-only inspection on 2026-10-09 found 11 SELECTING snapshots, all one internal set: three with zero rounds, eight with one round, none with a completed set. No incompatible snapshots were found in that inspection. Startup migration only creates missing schema objects.
+
+Source backup before this correction: `backups/owner-nine-round-20261009/source-before.tar.gz` (excludes production data, git, dependencies, and prior backups). Production SQLite files are preserved and ignored.

@@ -1,46 +1,13 @@
-# number-duel 게임 규칙 (RULES)
-원작 브랜드/문구는 사용하지 않는 오리지널 숫자 심리전 시스템.
+# number-duel rules
 
-## 1. 관계
-- 방(Room): 두 명 (seat A=호스트, B=게스트) 정원 고정. 제3자 입장 불가.
-- 게임(Game): 방당 하나(활성). 1~N 게임(재대결로 game_no 증가). 먼저 2세트 선승하면 게임 종료.
+Each room has two players. A match is exactly **nine rounds**, with one tile of each number 1–9 per player. Each tile can be used once per match.
 
-## 2. 기본 규칙
-- 각 플레이어: 1~9 숫자 각 1개 (라운드마다 1개 소비, 세트 종료 시 리셋).
-- 세트 = 9라운드.
-- 각 라운드: 두 플레이어가 남은 숫자 중 1개를 비공개 제출. 양쪽 제출 시 서버가 즉시 판정.
+Each round, players submit one remaining tile. Higher numbers win, except **1 beats 9**. Equal numbers draw the round and add no round win to either score. After the ninth round, the player with more round wins wins the match. Equal totals finish the match as **DRAW** with `finished=true`, `winner=null`, and no winner player ID. This match tie policy is **our webgame custom policy**, not a claimed official rule.
 
-## 3. 승패 판정 (resolveRound)
-- 큰 숫자 승리.
-- 예외: 1 > 9 (1은 9를 이긴다).
-- 동일 숫자: DRAW (무)(스코어 반영하지 않음).
-- 결과는 'A' / 'B' / 'DRAW'.
+There are no additional sets or automatic tie breakers. A fresh rematch starts only after both players consent, with new tiles and zero round scores.
 
-## 4. 세트 판정 (resolveSet)
-- 9라운드 완료 시 라운드 승수 비교.
-- 높은 승수 세트 승리.
-- 승수 같으면 세트 무승부 (양쪽 승수에 미반영).
-- 세트 승리 시 게임 세트승수 +1.
+Own numbers, remaining tiles, round outcomes, and round win totals are visible. Opponent exact numbers remain private before and after results. Once the opponent submits, their parity (`odd` or `even`) becomes visible immediately, even before your submission. Until then parity is null. Historical parity survives resolution, refresh, reconnect, and process restart. Blue tiles are labeled **홀수 ODD** and yellow tiles **짝수 EVEN**; information never relies on color alone.
 
-## 5. 게임 (resolveGame)
-- 세트 승수 2 먼저 달성 → 게임 종료, 그 플레이어 승리.
-- 그 이전에는 새 세트 시작 (번호 증가).
-- 세트 무승부로 선승 불가하면 무제한 세트 반복.
+Submissions are atomic and validated against membership, game, internal set 1, round, request ID, and remaining tiles. Matching retries return success without replaying a move; conflicting or stale requests are rejected.
 
-## 6. 정보 공개
-- 자기 사용 숫자: 항상 확인 가능.
-- 상대 사용 숫자: 진행 중/종료 후 모두 비공개.
-- 상대 제출 여부: 공개.
-- 라운드 승패, 누적 점수, 세트승수: 공개.
-- 제출 기록 히스토리: 라운드별 승/무/패 + 자기 숫자 만 공개.
-
-## 7. 상태 머신
-Room: WAITING → READY → PLAYING → FINISHED → READY (재대결)
-Game: SELECTING → (양측 제출) → RESOLVING → SELECTING → SET_FINISHED → GAME_FINISHED
-
-추가 확정:
-- 불가능한 전이 오류 (예. GAME_FINISHED → submit).
-- 이미 소진한 숫자 제출 거절.
-- 같은 라운드 자기 재제출(다른 숫자 포함) 거절; 같은 숫자 재제출은 멱등 성공.
-- 제출 확정은 DB 트랜잭션으로 한 팀당 1회.
-- dibs:이미 submit 요청이 완전 처리된 라운드는 재계산 없이 기존 결과 반납.
+The database retains one internal set container for compatibility, but it never creates extra sets. Unfinished legacy snapshots with multiple sets or an already completed internal set are preserved and blocked with `LEGACY_GAME_INCOMPATIBLE`, pending owner review; they are never silently reset or converted. Compatible single-set partial matches continue with their saved tiles.

@@ -17,23 +17,25 @@ function freshDb() {
 describe("rematch", () => {
   test("한쪽만 동의 → 아직 미완", () => {
     const { db, repo } = freshDb();
-    const { room } = repo.create(); repo.join(room.id);
+    const { room } = repo.create();
+    repo.join(room.id);
     const g = repo.createGame(room.id);
-    // 빨리 게임을 끝내기: A가 10라운드 승리? 불가 — 세트 최대 9.
-    // 강제로 snapshot finished 세팅
-    db.query(`UPDATE game_state SET snapshot=? WHERE game_id=?`).run(JSON.stringify({
-      aSetWins: 2, bSetWins: 0, sets: [], finished: true, winner: "A"
-    }), g.id);
+    for (let n = 1; n <= 9; n++) {
+      submitInTx(db, g.id, "A", n);
+      submitInTx(db, g.id, "B", n);
+    }
     const r = rematchInTx(db, room.id, "A");
     expect(r.completed).toBe(false);
   });
   test("양쪽 동의 → 새 게임 GAME_FINISHED 기존 + 새 SELECTING", () => {
     const { db, repo } = freshDb();
-    const { room } = repo.create(); repo.join(room.id);
+    const { room } = repo.create();
+    repo.join(room.id);
     const g = repo.createGame(room.id);
-    db.query(`UPDATE game_state SET snapshot=? WHERE game_id=?`).run(JSON.stringify({
-      aSetWins: 2, bSetWins: 0, sets: [], finished: true, winner: "A"
-    }), g.id);
+    for (let n = 1; n <= 9; n++) {
+      submitInTx(db, g.id, "A", n);
+      submitInTx(db, g.id, "B", n === 1 ? 9 : n - 1);
+    }
     rematchInTx(db, room.id, "A");
     const r = rematchInTx(db, room.id, "B");
     expect(r.completed).toBe(true);
@@ -44,7 +46,8 @@ describe("rematch", () => {
   });
   test("진행 중 게임에 rematch 거절", () => {
     const { db, repo } = freshDb();
-    const { room } = repo.create(); repo.join(room.id);
+    const { room } = repo.create();
+    repo.join(room.id);
     const g = repo.createGame(room.id);
     expect(() => rematchInTx(db, room.id, "A")).toThrow("GAME_IN_PROGRESS");
   });

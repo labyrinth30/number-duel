@@ -1,165 +1,228 @@
-// app.ts — Hono 앱 (return fetch-compatible)
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
+import type { Database } from "bun:sqlite";
 import { openDb, migrate } from "./db/client.ts";
 import { config } from "./config/env.ts";
 import { RoomRepository } from "./db/repositories/room.repository.ts";
 import { submitInTx } from "./db/repositories/game.repository.ts";
 import { rematchInTx } from "./db/repositories/rematch.repository.ts";
-import { ApiError, err, newInviteCode, hashToken, newSessionToken, newPlayerId, newGameId, newRoundId } from "./utils/errors.ts";
-import { emptySnapshot, getPlayerView, getRemainingNumbers, type Seat, type GameSnapshot } from "./domain/game/engine.ts";
-import { homeView, lobbyView, gameView, resultView, errorView, layout, esc } from "./views/index.ts";
-import { registerWsGateway } from "./ws/gateway.ts";
-import { z } from "zod";
-
-export function createApp() {
-  const db = openDb(config.dbPath);
+import { ApiError, err, hashToken } from "./utils/errors.ts";
+import { getPlayerView } from "./domain/game/engine.ts";
+import {
+  layout,
+  homeView,
+  lobbyView,
+  gameView,
+  errorView,
+} from "./views/index.ts";
+export function authenticate(db: Database, roomId: string, cookie: string) {
+  const repo = new RoomRepository(db);
+  for (const part of cookie.split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (
+      !["A", "B"].some(
+        (seat) =>
+          key === `nd_${seat}_${roomId}` ||
+          key === `nd_${seat}_${roomId.slice(0, 6)}`,
+      )
+    )
+      continue;
+    const p = repo
+      .players(roomId)
+      .find((p) => p.session_token_hash === hashToken(value.join("=")));
+    if (p) return p;
+  }
+  return null;
+}
+export function createApp(
+  db = openDb(config.dbPath),
+  broadcast: (roomId: string) => void = () => {},
+) {
   migrate(db);
   const rooms = new RoomRepository(db);
-
   const app = new Hono();
-
-  // 닉네임 검증
-  function validNickname(raw: unknown): string {
-    if (typeof raw !== "string") throw err("BAD_NICKNAME");
-    const trimmed = raw.trim();
-    if (trimmed.length < 1 || trimmed.length > 16) throw err("BAD_NICKNAME");
-    // 태그 제거/이스케이프는 렌더러가 담당. 여기서 특수 문자열 필터
-    return trimmed;
-  }
-
-  // 세션: 좌석별 쿠키. 한 브라우저에서 A/B 둘 다 플레이 가능 (nd_A_<id6>, nd_B_<id6>)
-  function cookieKey(roomId: string, seat: Seat) { return `nd_${seat}_${roomId.slice(0, 6)}`; }
-  function sessionFor(c: any, roomId: string, seat?: Seat): { token: string; tokenHash: string } | null {
-    const header = c.req.header("Cookie") ?? "";
-    const keys = seat ? [cookieKey(roomId, seat)] : (["A", "B"] as Seat[]).map(s => cookieKey(roomId, s));
-    for (const part of header.split(";")) {
-      const [k, ...rest] = part.trim().split("=");
-      if (keys.includes(k)) return { token: rest.join("="), tokenHash: hashToken(rest.join("=")) };
+  const rates = new Map<string, { at: number; n: number }>();
+  app.use("*", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("Referrer-Policy", "same-origin");
+    if (c.req.method === "POST") {
+      const origin = c.req.header("origin");
+      const u = new URL(c.req.url);
+      const expected = `${c.req.header("x-forwarded-proto") === "https" ? "https:" : u.protocol}//${u.host}`;
+      if (origin && origin !== expected && origin !== process.env.PUBLIC_ORIGIN)
+        throw err("FORBIDDEN");
+      if (Number(c.req.header("content-length") ?? 0) > 4096)
+        return c.json({ code: "PAYLOAD_TOO_LARGE" }, 413);
+      const raw = await c.req.raw.clone().text();
+      if (new TextEncoder().encode(raw).length > 4096)
+        return c.json({ code: "PAYLOAD_TOO_LARGE" }, 413);
+      const key = hashToken(c.req.header("cookie") ?? "anonymous");
+      const now = Date.now();
+      const r = rates.get(key);
+      const entry = r && now - r.at < 60000 ? r : { at: now, n: 0 };
+      entry.n++;
+      rates.set(key, entry);
+      if (rates.size > 10000)
+        for (const [k, v] of rates) if (now - v.at > 60000) rates.delete(k);
+      if (entry.n > 180) return c.json({ code: "RATE_LIMITED" }, 429);
     }
-    return null;
-  }
-  function setSessionCookie(c: any, roomId: string, seat: Seat, token: string) {
-    const key = cookieKey(roomId, seat);
-    c.header("Set-Cookie", `${key}=${token}; Path=/duel; Max-Age=86400; SameSite=Lax; HttpOnly; Secure`);
-  }
-
-  const statePayload = (c: any, roomId: string) => {
-    const r = rooms.byId(roomId);
+    await next();
+  });
+  app.onError((e, c) =>
+    c.json(
+      { code: e instanceof ApiError ? e.code : "INTERNAL" },
+      (e instanceof ApiError ? e.status : 500) as 400,
+    ),
+  );
+  const roomFor = (code: string) => {
+    const r = rooms.byInvite(code);
     if (!r) throw err("ROOM_NOT_FOUND");
-    const ag = rooms.activeGame(roomId);
-    if (ag && ag.snapshot) {
-      const seat: Seat = (rooms.byRoomAndSeat(roomId, "A")!.id === ag.winner_player_id ? "A" : "B");
-      // 실제로는 플레이어의 seat 필요: 아래에서 전달
-      return { room: r, activeGame: ag };
-    }
-    return { room: r, activeGame: null };
+    return r;
   };
-
-  // ---- REST ----
+  const member = (roomId: string, cookie: string) => {
+    const p = authenticate(db, roomId, cookie);
+    if (!p) throw err("UNAUTHORIZED");
+    rooms.touch(roomId);
+    return p;
+  };
+  const nick = (v: unknown) => {
+    if (typeof v !== "string" || !v.trim() || v.trim().length > 16)
+      throw err("BAD_NICKNAME");
+    return v.trim();
+  };
+  function cookie(c: any, roomId: string, seat: string, token: string) {
+    const secure =
+      process.env.NODE_ENV === "production" ||
+      c.req.header("x-forwarded-proto") === "https" ||
+      new URL(c.req.url).protocol === "https:";
+    c.header(
+      "Set-Cookie",
+      `nd_${seat}_${roomId}=${token}; Path=/duel/; Max-Age=86400; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`,
+    );
+  }
   app.post("/api/rooms", async (c) => {
-    const body = await c.req.parseBody().catch(() => { throw err("BAD_NICKNAME"); });
-    const nickname = validNickname(body.nickname);
-    const { room, host, sessionToken } = rooms.create();
-    rooms.setNickname(host.id, nickname);
-    setSessionCookie(c, room.id, "A", sessionToken);
-    return c.json({ code: room.invite_code, roomId: room.id, playerId: host.id }, 201, {
-      "Cache-Control": "no-store",
+    const n = nick((await c.req.parseBody()).nickname);
+    const out = db
+      .transaction(() => {
+        const o = rooms.create();
+        rooms.setNickname(o.host.id, n);
+        return o;
+      })
+      .immediate();
+    cookie(c, out.room.id, "A", out.sessionToken);
+    return c.json({ code: out.room.invite_code }, 201);
+  });
+  app.post("/api/rooms/:code/join", async (c) => {
+    const room = roomFor(c.req.param("code"));
+    const n = nick((await c.req.parseBody()).nickname);
+    const out = db
+      .transaction(() => {
+        const o = rooms.join(room.id);
+        rooms.setNickname(o.player.id, n);
+        return o;
+      })
+      .immediate();
+    cookie(c, room.id, "B", out.sessionToken);
+    broadcast(room.id);
+    return c.json({ seat: "B" }, 201);
+  });
+  app.get("/api/rooms/:code/state", (c) => {
+    const r = roomFor(c.req.param("code"));
+    const p = member(r.id, c.req.header("cookie") ?? "");
+    const g = rooms.activeGame(r.id);
+    const flags = g
+      ? (db
+          .query("SELECT rematch_a,rematch_b FROM game_state WHERE game_id=?")
+          .get(g.game.id) as { rematch_a: number; rematch_b: number })
+      : null;
+    return c.json({
+      roomStatus: r.status,
+      seat: p.seat,
+      players: rooms
+        .players(r.id)
+        .map((p) => ({ seat: p.seat, nickname: p.nickname })),
+      gameId: g?.game.id ?? null,
+      winnerPlayerId: g?.game.winner_player_id ?? null,
+      rematch: flags
+        ? {
+            mine: !!(p.seat === "A" ? flags.rematch_a : flags.rematch_b),
+            opponent: !!(p.seat === "A" ? flags.rematch_b : flags.rematch_a),
+          }
+        : null,
+      view: g ? getPlayerView(p.seat, g.snapshot, g.stateVersion) : null,
     });
   });
-
-  app.post("/api/rooms/:code/join", async (c) => {
-    const code = c.req.param("code");
-    const room = rooms.byInvite(code);
-    if (!room) throw err("ROOM_NOT_FOUND");
-    const body = await c.req.parseBody().catch(() => { throw err("BAD_NICKNAME"); });
-    const nickname = validNickname(body.nickname);
-    const { player, sessionToken } = rooms.join(room.id);
-    rooms.setNickname(player.id, nickname);
-    setSessionCookie(c, room.id, "B", sessionToken);
-    return c.json({ roomId: room.id, playerId: player.id, seat: player.seat }, 201, { "Cache-Control": "no-store" });
-  });
-
-  app.get("/api/rooms/:code/state", async (c) => {
-    const code = c.req.param("code");
-    const room = rooms.byInvite(code);
-    if (!room) throw err("ROOM_NOT_FOUND");
-    const sess = sessionFor(c, room.id);
-    if (!sess) throw err("UNAUTHORIZED");
-    const p = rooms.players(room.id).find(x => x.session_token_hash === sess.tokenHash);
-    if (!p) throw err("FORBIDDEN");
-    const ag = rooms.activeGame(room.id);
-    const seat: Seat = p.seat;
-    const view = ag && ag.snapshot ? getPlayerView(seat, ag.snapshot as GameSnapshot, ag.stateVersion) : null;
-    return c.json({ roomId: room.id, seat, roomStatus: room.status, view }, 200, { "Cache-Control": "no-store" });
-  });
-
-  app.post("/api/rooms/:code/start", async (c) => {
-    const code = c.req.param("code");
-    const room = rooms.byInvite(code);
-    if (!room) throw err("ROOM_NOT_FOUND");
-    const sess = sessionFor(c, room.id);
-    if (!sess) throw err("UNAUTHORIZED");
-    const p = rooms.players(room.id).find(x => x.session_token_hash === sess.tokenHash);
-    if (!p) throw err("FORBIDDEN");
+  app.post("/api/rooms/:code/start", (c) => {
+    const r = roomFor(c.req.param("code"));
+    const p = member(r.id, c.req.header("cookie") ?? "");
     if (p.seat !== "A") throw err("NOT_HOST");
-    if (rooms.players(room.id).length < 2) throw err("ROOM_NOT_READY");
-    const g = rooms.createGame(room.id);
-    return c.json({ gameId: g.id }, 201, { "Cache-Control": "no-store" });
+    if (r.status !== "READY") throw err("ROOM_NOT_READY");
+    const g = rooms.createGame(r.id);
+    broadcast(r.id);
+    return c.json({ gameId: g.id }, 201);
   });
-
-  // rest submit endpoint (HTTP fallback; 게임은 WS 권장)
-  app.post("/api/game/:gameId/submit", async (c) => {
-    const gameId = c.req.param("gameId");
-    const body = await c.req.parseBody().catch(() => { throw err("OUT_OF_RANGE"); });
-    const number = Number(body.number);
-    const g = db.query(`SELECT room_id FROM games WHERE id=?`).get(gameId) as { room_id: string } | null;
-    if (!g) throw err("GAME_FINISHED");
-    const sess = sessionFor(c, g.room_id, "A");
-    const sessB = sessionFor(c, g.room_id, "B");
-    const cur = sess ?? sessB;
-    if (!cur) throw err("UNAUTHORIZED");
-    const p = rooms.players(g.room_id).find(x => x.session_token_hash === cur.tokenHash);
-    if (!p) throw err("FORBIDDEN");
-    const out = submitInTx(db, gameId, p.seat, number);
-    return c.json({ ok: true, resolved: out.resolved, stateVersion: out.stateVersion }, 200, { "Cache-Control": "no-store" });
+  app.post("/api/rooms/:code/submit", async (c) => {
+    const r = roomFor(c.req.param("code"));
+    const p = member(r.id, c.req.header("cookie") ?? "");
+    const b = await c.req.parseBody();
+    if (
+      typeof b.gameId !== "string" ||
+      typeof b.requestId !== "string" ||
+      !b.requestId ||
+      b.requestId.length > 80 ||
+      !Number.isInteger(Number(b.setNo)) ||
+      !Number.isInteger(Number(b.roundNo))
+    )
+      throw new ApiError(400, "BAD_PAYLOAD", "BAD_PAYLOAD");
+    const o = submitInTx(db, b.gameId, p.seat, Number(b.number), {
+      roomId: r.id,
+      playerId: p.id,
+      setNo: Number(b.setNo),
+      roundNo: Number(b.roundNo),
+      requestId: b.requestId,
+    });
+    broadcast(r.id);
+    return c.json({ ok: true, stateVersion: o.stateVersion });
   });
-
-  // rematch (HTTP)
-  app.post("/api/game/rematch", async (c) => {
-    const body = await c.req.parseBody().catch(() => { throw err("BAD_NICKNAME"); });
-    const code = String(body.code || "");
-    const room = rooms.byInvite(code);
-    if (!room) throw err("ROOM_NOT_FOUND");
-    const sessA = sessionFor(c, room.id, "A");
-    const sessB = sessionFor(c, room.id, "B");
-    const cur = sessA ?? sessB;
-    if (!cur) throw err("UNAUTHORIZED");
-    const p = rooms.players(room.id).find(x => x.session_token_hash === cur.tokenHash);
-    if (!p) throw err("FORBIDDEN");
-    const r = rematchInTx(db, room.id, p.seat);
-    return c.json({ ok: true, ...r }, 200, { "Cache-Control": "no-store" });
+  app.post("/api/rooms/:code/rematch", async (c) => {
+    const r = roomFor(c.req.param("code"));
+    const p = member(r.id, c.req.header("cookie") ?? "");
+    const b = await c.req.parseBody();
+    const g = rooms.activeGame(r.id);
+    if (!g || b.gameId !== g.game.id)
+      throw new ApiError(409, "STALE_GAME", "STALE_GAME");
+    const o = rematchInTx(db, r.id, p.seat);
+    broadcast(r.id);
+    return c.json(o);
   });
-
-  app.get("/health", (c) => c.json({ ok: true, ts: Date.now() }));
-
-  app.use("/static/*", serveStatic({ root: "./public", rewriteRequestPath: (p: string) => p.replace("/static", "") }));
-
-  // ---- pages ----
+  app.get("/health", (c) => c.json({ ok: true }));
+  app.use(
+    "/static/*",
+    serveStatic({
+      root: "./public",
+      rewriteRequestPath: (p) => p.replace("/static", ""),
+    }),
+  );
   app.get("/", (c) => c.html(layout("number-duel", homeView())));
-  app.get("/rooms/:code", async (c) => {
-    const code = c.req.param("code");
-    const room = rooms.byInvite(code);
-    if (!room) return c.html(layout("not found", errorView("방을 찾을 수 없음")), 404);
-    // 게임 중이면 게임 뷰, 아니면 로비
-    const ag = rooms.activeGame(room.id);
-    const players = rooms.players(room.id);
-    if (ag && ag.snapshot && room.status === "PLAYING") {
-      return c.html(layout("game", gameView(code, players.map(p => p.nickname))));
-    }
-    if (room.status === "FINISHED") return c.html(layout("result", resultView(code)));
-    return c.html(layout("lobby", lobbyView(code, players.map(p => p.nickname))));
+  app.get("/rooms/:code", (c) => {
+    const r = roomFor(c.req.param("code"));
+    const ps = rooms.players(r.id);
+    const p = authenticate(db, r.id, c.req.header("cookie") ?? "");
+    if (p) return c.html(layout("game", gameView(r.invite_code, [])));
+    return c.html(
+      layout(
+        "lobby",
+        lobbyView(
+          r.invite_code,
+          [],
+          ps.length < 2,
+          ps[0]?.nickname ?? "",
+          ps[1]?.nickname ?? null,
+          false,
+        ),
+      ),
+    );
   });
-
   return app;
 }

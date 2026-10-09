@@ -21,16 +21,14 @@ export interface SetState {
   bScore: number;
 }
 export interface GameSnapshot {
-  aSetWins: number;
-  bSetWins: number;
   sets: SetState[];
   finished: boolean;
   winner: Seat | null;
 }
 
 // ---------------- 기본 정책 ----------------
-export const ROUNDS_PER_SET = 9;
-export const SETS_TO_WIN = 2;
+export const ROUNDS_PER_GAME = 9;
+
 export const NUM_MIN = 1;
 export const NUM_MAX = 9;
 
@@ -40,37 +38,53 @@ export interface MoveInput {
   number: number;
   snapshot: GameSnapshot;
 }
-export interface MoveCheck { ok: true; setNo: number; roundNo: number }
-export interface MoveError { ok: false; code: string; message: string }
+export interface MoveCheck {
+  ok: true;
+  setNo: number;
+  roundNo: number;
+}
+export interface MoveError {
+  ok: false;
+  code: string;
+  message: string;
+}
 
 /**
  * 제출 가능 여부 검사. 오류 코드:
- * - GAME_FINISHED / SET_FINISHED_PENDING / ALREADY_SUBMITTED / NUMBER_USED / OUT_OF_RANGE
+ * - GAME_FINISHED / ALREADY_SUBMITTED / NUMBER_USED / OUT_OF_RANGE
  */
 export function validateMove(input: MoveInput): MoveCheck | MoveError {
   const { seat, number, snapshot } = input;
-  if (snapshot.finished) return { ok: false, code: "GAME_FINISHED", message: "이 게임은 이미 종료됐어." };
+  if (snapshot.finished)
+    return {
+      ok: false,
+      code: "GAME_FINISHED",
+      message: "이 게임은 이미 종료됐어.",
+    };
   const curSet = currentSet(snapshot);
-  if (!curSet) return { ok: false, code: "GAME_FINISHED", message: "이 게임은 이미 종료됐어." };
-  if (curSet.winner) return { ok: false, code: "SET_FINISHED_PENDING", message: "이 세트는 이미 확정됐어." };
-  if (curSet.rounds.length >= ROUNDS_PER_SET) return { ok: false, code: "SET_FINISHED_PENDING", message: "이 세트는 이미 확정됐어." };
-  const roundNo = curSet.rounds.length + 1;
-  const curRound = curSet.rounds[curSet.rounds.length - 1];
-  // 이미 제출했는지
-  if (curRound && curRound[`${seat.toLowerCase()}Number` as "aNumber" | "bNumber"] !== null) {
-    return { ok: false, code: "ALREADY_SUBMITTED", message: "이 라운드에는 이미 제출했어." };
-  }
-  // 숫자 사용 여부
-  const used = new Set<number>();
-  for (const set of snapshot.sets) {
-    for (const r of set.rounds) {
-      if (r.aNumber !== null) used.add(r.aNumber);
-      if (r.bNumber !== null) used.add(r.bNumber);
-    }
-  }
-  if (used.has(number)) return { ok: false, code: "NUMBER_USED", message: `숫자 ${number}는 이미 사용했어.` };
+  if (!curSet)
+    return {
+      ok: false,
+      code: "GAME_FINISHED",
+      message: "이 게임은 이미 종료됐어.",
+    };
+  const last = curSet.rounds.at(-1);
+  const open = last?.outcome === null ? last : null;
+  const roundNo = open ? open.roundNo : curSet.rounds.length + 1;
+  if (open && (seat === "A" ? open.aNumber : open.bNumber) !== null)
+    return {
+      ok: false,
+      code: "ALREADY_SUBMITTED",
+      message: "ALREADY_SUBMITTED",
+    };
+  if (!getRemainingNumbers(seat, snapshot).includes(number))
+    return { ok: false, code: "NUMBER_USED", message: "NUMBER_USED" };
   if (!Number.isInteger(number) || number < NUM_MIN || number > NUM_MAX) {
-    return { ok: false, code: "OUT_OF_RANGE", message: "숫자는 1부터 9까지야." };
+    return {
+      ok: false,
+      code: "OUT_OF_RANGE",
+      message: "숫자는 1부터 9까지야.",
+    };
   }
   return { ok: true, setNo: curSet.setNo, roundNo };
 }
@@ -82,8 +96,10 @@ export function validateMove(input: MoveInput): MoveCheck | MoveError {
  * (純 판정, 상태 변형 없음)
  */
 export function resolveRound(aNumber: number, bNumber: number): RoundOutcome {
-  if (!Number.isInteger(aNumber) || aNumber < NUM_MIN || aNumber > NUM_MAX) throw new Error(`INVALID_A:${aNumber}`);
-  if (!Number.isInteger(bNumber) || bNumber < NUM_MIN || bNumber > NUM_MAX) throw new Error(`INVALID_B:${bNumber}`);
+  if (!Number.isInteger(aNumber) || aNumber < NUM_MIN || aNumber > NUM_MAX)
+    throw new Error(`INVALID_A:${aNumber}`);
+  if (!Number.isInteger(bNumber) || bNumber < NUM_MIN || bNumber > NUM_MAX)
+    throw new Error(`INVALID_B:${bNumber}`);
   if (aNumber === bNumber) return "DRAW";
   if (aNumber === NUM_MIN && bNumber === NUM_MAX) return "A"; // 1 > 9
   if (bNumber === NUM_MIN && aNumber === NUM_MAX) return "B"; // 9 < 1
@@ -91,9 +107,12 @@ export function resolveRound(aNumber: number, bNumber: number): RoundOutcome {
 }
 
 // ---------------- getRemainingNumbers ----------------
-export function getRemainingNumbers(seat: Seat, snapshot: GameSnapshot): number[] {
+export function getRemainingNumbers(
+  seat: Seat,
+  snapshot: GameSnapshot,
+): number[] {
   const used = new Set<number>();
-  for (const set of snapshot.sets) {
+  for (const set of snapshot.sets.slice(-1)) {
     for (const r of set.rounds) {
       const n = seat === "A" ? r.aNumber : r.bNumber;
       if (n !== null) used.add(n);
@@ -117,12 +136,20 @@ function makeSet(setNo: number): SetState {
 }
 
 export function emptySnapshot(): GameSnapshot {
-  return { aSetWins: 0, bSetWins: 0, sets: [makeSet(1)], finished: false, winner: null };
+  return {
+    sets: [makeSet(1)],
+    finished: false,
+    winner: null,
+  };
 }
 
 export function currentRoundNo(snapshot: GameSnapshot): number {
   const set = currentSet(snapshot);
-  return set ? set.rounds.length + 1 : 0;
+  return set
+    ? set.rounds.at(-1)?.outcome === null
+      ? set.rounds.length
+      : set.rounds.length + 1
+    : 0;
 }
 export function currentSetNo(snapshot: GameSnapshot): number {
   const set = currentSet(snapshot);
@@ -133,12 +160,25 @@ export function currentSetNo(snapshot: GameSnapshot): number {
  * 숫자를 상태에 기록. 이미 resolution 확정된 상황이면 오류.
  * (提交 확정 전 저장단계 — 트랜잭션 내부에서 물리고 resolveIfBoth가 다음 단계)
  */
-export function recordNumber(snapshot: GameSnapshot, seat: Seat, number: number): void {
+export function recordNumber(
+  snapshot: GameSnapshot,
+  seat: Seat,
+  number: number,
+): void {
   const set = currentSet(snapshot);
   if (!set) throw new Error("CANNOT_RECORD_SET_FINISHED");
   let round = set.rounds[set.rounds.length - 1];
-  if (!round || round.outcome !== null || (round.aNumber !== null && round.bNumber !== null)) {
-    round = { roundNo: set.rounds.length + 1, aNumber: null, bNumber: null, outcome: null };
+  if (
+    !round ||
+    round.outcome !== null ||
+    (round.aNumber !== null && round.bNumber !== null)
+  ) {
+    round = {
+      roundNo: set.rounds.length + 1,
+      aNumber: null,
+      bNumber: null,
+      outcome: null,
+    };
     set.rounds.push(round);
   }
   const field = seat === "A" ? "aNumber" : "bNumber";
@@ -148,8 +188,8 @@ export function recordNumber(snapshot: GameSnapshot, seat: Seat, number: number)
 
 /**
  * 양쪽 제출 완료 시 즉시 판정. 마지막 라운드 outcome을 채움.
- * 9라운드 끝나면 세트 winner 확정 (게임 스코어 반영).
- * 세트 승리 2 이상이면 게임 종료.
+ * The single internal set stores the match round scores.
+ * Nine rounds finish the match; equal round scores are our webgame draw policy.
  */
 export function resolveIfBoth(snapshot: GameSnapshot): void {
   const set = currentSet(snapshot);
@@ -160,26 +200,31 @@ export function resolveIfBoth(snapshot: GameSnapshot): void {
   last.outcome = resolveRound(last.aNumber, last.bNumber);
   if (last.outcome === "A") set.aScore++;
   else if (last.outcome === "B") set.bScore++;
-  // 세트 완료 여부
-  if (set.rounds.length >= ROUNDS_PER_SET) {
+  // Finish once all nine rounds resolve.
+  if (set.rounds.length >= ROUNDS_PER_GAME) {
     if (set.aScore > set.bScore) set.winner = "A";
     else if (set.bScore > set.aScore) set.winner = "B";
     else set.winner = "DRAW";
-    if (set.winner === "A") snapshot.aSetWins++;
-    else if (set.winner === "B") snapshot.bSetWins++;
-    if (snapshot.aSetWins >= SETS_TO_WIN) { snapshot.finished = true; snapshot.winner = "A"; }
-    else if (snapshot.bSetWins >= SETS_TO_WIN) { snapshot.finished = true; snapshot.winner = "B"; }
+    snapshot.finished = true;
+    snapshot.winner = set.winner === "DRAW" ? null : set.winner;
   }
 }
 
-/** 세트 확정 후 다음 세트 자동 생성 (게임 진행 유지 시) */
-export function nextGameState(snapshot: GameSnapshot): GameSnapshot {
-  if (snapshot.finished) return snapshot;
-  const last = snapshot.sets[snapshot.sets.length - 1];
-  if (last && last.winner && last.setNo === snapshot.sets.length) {
-    snapshot.sets.push(makeSet(last.setNo + 1));
-  }
-  return snapshot;
+/** Unfinished legacy multi-set games require owner review; never rewrite them. */
+export function isIncompatibleLegacy(snapshot: GameSnapshot): boolean {
+  return (
+    !snapshot.finished &&
+    (snapshot.sets.length !== 1 ||
+      snapshot.sets[0]?.setNo !== 1 ||
+      (snapshot.sets[0]?.rounds.length >= ROUNDS_PER_GAME &&
+        snapshot.sets[0]?.rounds.at(-1)?.outcome !== null) ||
+      !!snapshot.sets[0]?.winner)
+  );
+}
+
+export type Parity = "odd" | "even";
+function parity(number: number | null): Parity | null {
+  return number === null ? null : number % 2 ? "odd" : "even";
 }
 
 // ---------------- View DTO ----------------
@@ -191,21 +236,20 @@ export interface RoundView {
   roundNo: number;
   myNumber: number | null;
   opponentSubmitted: boolean;
+  opponentParity: Parity | null;
   outcome: RoundOutcome | null; // 확정만 공개
 }
 export interface SetView {
   setNo: number;
   rounds: RoundView[];
-  mySetScore: number;
-  opponentSetScore: number;
   winner: Seat | "DRAW" | null;
 }
 export interface PlayerView {
   stateVersion: number;
   finished: boolean;
   winner: Seat | null;
-  mySetWins: number;
-  opponentSetWins: number;
+  myRoundWins: number;
+  opponentRoundWins: number;
   setNo: number;
   roundNo: number;
   myRemaining: number[];
@@ -213,53 +257,79 @@ export interface PlayerView {
   current: {
     myNumber: number | null;
     opponentSubmitted: boolean;
+    opponentParity: Parity | null;
     awaitingBoth: boolean;
   } | null;
   sets: SetView[];
 }
 
-export function getPlayerView(seat: Seat, snapshot: GameSnapshot, stateVersion: number): PlayerView {
-  const me: Seat = seat, opp: Seat = seat === "A" ? "B" : "A";
+export function getPlayerView(
+  seat: Seat,
+  snapshot: GameSnapshot,
+  stateVersion: number,
+): PlayerView {
+  const me: Seat = seat,
+    opp: Seat = seat === "A" ? "B" : "A";
   const meField = me === "A" ? "aNumber" : "bNumber";
   const oppField = opp === "A" ? "aNumber" : "bNumber";
-  const meSetWins = me === "A" ? snapshot.aSetWins : snapshot.bSetWins;
-  const oppSetWins = opp === "A" ? snapshot.aSetWins : snapshot.bSetWins;
 
-  const sets: SetView[] = snapshot.sets.map(s => {
-    const rounds: RoundView[] = s.rounds.map(r => ({
+  const sets: SetView[] = snapshot.sets.map((s) => {
+    const rounds: RoundView[] = s.rounds.map((r) => ({
       roundNo: r.roundNo,
       myNumber: r[meField],
       opponentSubmitted: r[oppField] !== null,
+      opponentParity: parity(r[oppField]),
       outcome: r.outcome,
     }));
     return {
       setNo: s.setNo,
       rounds,
-      mySetScore: me === "A" ? s.aScore : s.bScore,
-      opponentSetScore: opp === "A" ? s.aScore : s.bScore,
       winner: s.winner,
     };
   });
 
   const cur = snapshot.sets[snapshot.sets.length - 1];
   const liveSet = cur && !cur.winner ? cur : null;
-  const liveRound = liveSet ? liveSet.rounds[liveSet.rounds.length - 1] : null;
-  const current = liveRound ? {
-    myNumber: liveRound[meField],
-    opponentSubmitted: liveRound[oppField] !== null,
-    awaitingBoth: liveRound.aNumber !== null && liveRound.bNumber !== null ? false : liveRound.aNumber === null || liveRound.bNumber === null,
-  } : null;
+  const last = liveSet?.rounds.at(-1);
+  const liveRound = last?.outcome === null ? last : null;
+  const current = liveRound
+    ? {
+        myNumber: liveRound[meField],
+        opponentSubmitted: liveRound[oppField] !== null,
+        opponentParity: parity(liveRound[oppField]),
+        awaitingBoth:
+          liveRound.aNumber !== null && liveRound.bNumber !== null
+            ? false
+            : liveRound.aNumber === null || liveRound.bNumber === null,
+      }
+    : liveSet
+      ? {
+          myNumber: null,
+          opponentSubmitted: false,
+          opponentParity: null,
+          awaitingBoth: true,
+        }
+      : null;
 
   return {
     stateVersion,
     finished: snapshot.finished,
-    winner: snapshot.winner === "A" || snapshot.winner === "B" ? (snapshot.winner === me ? "A" : "B") : null,
-    mySetWins: meSetWins,
-    opponentSetWins: oppSetWins,
-    setNo: liveSet ? liveSet.setNo : (cur ? cur.setNo : 0),
-    roundNo: liveSet ? liveSet.rounds.length + 1 : (cur ? cur.rounds.length : 0),
+    winner: snapshot.winner,
+    myRoundWins: cur ? (seat === "A" ? cur.aScore : cur.bScore) : 0,
+    opponentRoundWins: cur ? (seat === "A" ? cur.bScore : cur.aScore) : 0,
+    setNo: liveSet ? liveSet.setNo : cur ? cur.setNo : 0,
+    roundNo: snapshot.finished
+      ? (cur?.rounds.length ?? 0)
+      : currentRoundNo(snapshot),
     myRemaining: getRemainingNumbers(seat, snapshot),
-    myUsed: Array.from(new Set((snapshot.sets.flatMap(s => s.rounds.map(r => r[meField])).filter(n => n !== null) as number[]))),
+    myUsed: Array.from(
+      new Set(
+        snapshot.sets
+          .slice(-1)
+          .flatMap((s) => s.rounds.map((r) => r[meField]))
+          .filter((n) => n !== null) as number[],
+      ),
+    ),
     current,
     sets,
   };

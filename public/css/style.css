@@ -25,3 +25,10 @@ ul.choice-row .n-btn.sel { border-color:var(--acc); background:var(--acc); color
 .fade { animation: fade .45s both; }
 @keyframes fade { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
 .tpl { font-weight:700; color:var(--acc); }
+
+/* Text labels accompany both colors; dark text gives strong contrast. */
+.parity, .n-btn { display:inline-block; padding:8px; margin:4px; border-radius:6px; font-weight:700; }
+.odd { background:#93c5fd; color:#111827; }
+.even { background:#fde047; color:#111827; }
+.n-btn { border:2px solid currentColor; cursor:pointer; }
+.n-btn:focus-visible { outline:3px solid white; outline-offset:3px; }

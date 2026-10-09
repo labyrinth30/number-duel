@@ -64,6 +64,12 @@ export function migrate(db: Database): void {
     rematch_b INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY(game_id) REFERENCES games(id) ON DELETE CASCADE
   );
+  CREATE TABLE IF NOT EXISTS submissions (
+    game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    seat TEXT NOT NULL, request_id TEXT NOT NULL, set_no INTEGER NOT NULL,
+    round_no INTEGER NOT NULL, number INTEGER NOT NULL,
+    PRIMARY KEY(game_id, seat, request_id)
+  );
   -- 활성 게임은 방당 최대 하나
   CREATE UNIQUE INDEX IF NOT EXISTS idx_active_game_per_room
     ON games(room_id) WHERE status IN ('SELECTING','RESOLVING','SET_FINISHED');
