@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "target": "esnext",
+    "types": ["bun-types"],
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*", "tests/**/*"]
+}
