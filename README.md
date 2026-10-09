@@ -1,6 +1,6 @@
 # number-duel
 
-Two-player invitation game: exactly nine rounds, using each 1–9 tile once per match. Higher wins except 1 beats 9; equal tiles draw the round. Compare round win totals after round nine. Equal totals finish a DRAW match (our webgame custom policy, not a claimed official rule). A fresh rematch requires both players' consent. Opponent exact numbers remain private; opponent ODD/EVEN parity appears immediately upon submission and remains in round history. Own tiles, remaining numbers, and round scores are displayed. Blue ODD and yellow EVEN tiles include text labels.
+Two-player invitation game: exactly nine rounds, using each 1–9 tile once per match. Higher wins except 1 beats 9; equal tiles draw the round. Compare round win totals after round nine. Equal totals finish a DRAW match (our webgame custom policy, not a claimed official rule). A fresh rematch requires both players' consent. Opponent exact numbers remain private; opponent 홀수/짝수 parity appears immediately upon submission and remains in round history. Own tiles, remaining numbers, and round scores are displayed. Blue 홀수 and yellow 짝수 tiles include text labels.
 
 Use `/home/ubuntu/.bun/bin/bun`. Development defaults to loopback port 3130; use an isolated DB and `PORT=0` when testing. Browser paths use `/duel/`; the server accepts both prefixed requests and nginx's stripped paths.
 

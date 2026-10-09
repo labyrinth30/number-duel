@@ -6,7 +6,7 @@ Each round, players submit one remaining tile. Higher numbers win, except **1 be
 
 There are no additional sets or automatic tie breakers. A fresh rematch starts only after both players consent, with new tiles and zero round scores.
 
-Own numbers, remaining tiles, round outcomes, and round win totals are visible. Opponent exact numbers remain private before and after results. Once the opponent submits, their parity (`odd` or `even`) becomes visible immediately, even before your submission. Until then parity is null. Historical parity survives resolution, refresh, reconnect, and process restart. Blue tiles are labeled **홀수 ODD** and yellow tiles **짝수 EVEN**; information never relies on color alone.
+Own numbers, remaining tiles, round outcomes, and round win totals are visible. Opponent exact numbers remain private before and after results. Once the opponent submits, their parity (`odd` or `even`) becomes visible immediately, even before your submission. Until then parity is null. Historical parity survives resolution, refresh, reconnect, and process restart. Blue tiles are labeled **홀수** and yellow tiles **짝수**; information never relies on color alone.
 
 Submissions are atomic and validated against membership, game, internal set 1, round, request ID, and remaining tiles. Matching retries return success without replaying a move; conflicting or stale requests are rejected.
 

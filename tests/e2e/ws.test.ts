@@ -242,7 +242,7 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
       .poll(async () => (await state(b)).view.current.opponentParity)
       .toBe("odd");
     expect((await state(b)).view.current.myNumber).toBeNull();
-    await expect(pb.locator("#opponentParity")).toContainText("ODD");
+    await expect(pb.locator("#opponentParity")).toContainText("홀수");
     // Stop the actual test server and reopen the same on-disk DB on the same port.
     proc!.kill();
     await proc!.exited;
@@ -251,7 +251,7 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
     await pb.reload();
     expect((await state(a)).view.current.myNumber).toBe(1);
     expect((await state(b)).view.current.opponentParity).toBe("odd");
-    await expect(pb.locator("#opponentParity")).toContainText("ODD");
+    await expect(pb.locator("#opponentParity")).toContainText("홀수");
     for (let r = 1; r <= 9; r++) {
       if (r !== 1) await selectConfirm(pa, aa[r - 1]!);
       await selectConfirm(pb, bb[r - 1]!);
@@ -271,8 +271,8 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
         await pa.reload();
         await expect(pa.locator("#lastResult")).toContainText("2라운드 · 승리");
         await pa.locator('[data-n="3"]').click();
-        await expect(pa.locator('#history [data-round="1"]')).toContainText("ODD");
-        await expect(pa.locator('#history [data-round="2"]')).toContainText("ODD");
+        await expect(pa.locator('#history [data-round="1"]')).toContainText("홀수");
+        await expect(pa.locator('#history [data-round="2"]')).toContainText("홀수");
         expect(await pa.locator('#history [data-round="1"] .history-number').textContent()).toBe("1");
         expect(await pa.locator('#history [data-round="2"] .history-number').textContent()).toBe("2");
         expect(await pa.locator(".opponent").textContent()).not.toMatch(/[1-9]/);
@@ -325,7 +325,7 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
         expect((await state(b)).view.sets[0].rounds[0].opponentParity).toBe(
           "odd",
         );
-        await expect(pb.locator("#history")).toContainText("ODD");
+        await expect(pb.locator("#history")).toContainText("홀수");
       }
     }
     await pa.locator("#result").waitFor();
@@ -375,8 +375,10 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
         .poll(async () => (await state(b)).view.current.opponentParity)
         .toBe(n % 2 ? "odd" : "even");
       await expect(pb.locator("#opponentParity")).toContainText(
-        n % 2 ? "ODD" : "EVEN",
+        n % 2 ? "홀수" : "짝수",
       );
+      await expect(pb.locator("body")).not.toContainText(/\b(?:ODD|EVEN)\b/i);
+      await expect(pb.locator(`#history [data-round="${n}"] .opponent-slot small`)).toHaveText(n % 2 ? "홀수" : "짝수");
       await selectConfirm(pb, n);
       await expect
         .poll(async () => {

@@ -23,7 +23,7 @@
     );
   const parity = (value) =>
     value
-      ? `<span class="parity ${value}">${value === "odd" ? "홀수 ODD" : "짝수 EVEN"}</span>`
+      ? `<span class="parity ${value}">${value === "odd" ? "홀수" : "짝수"}</span>`
       : '<span class="parity unknown">? · 미제출</span>';
 
   async function action(path, body) {
@@ -111,7 +111,7 @@
       const own = round?.myNumber ?? (active ? current.myNumber ?? selected : null);
       const other = round?.opponentParity ?? (active ? current.opponentParity : null);
       const badge = round?.outcome != null ? outcome(round.outcome) : null;
-      return `<li data-round="${i + 1}" class="history-cell ${active ? "active-round" : ""}" aria-label="${i + 1}라운드"><span class="round-label">R${i + 1}</span><div class="tile-slot opponent-slot"><span class="record-tile ${other ?? "empty"}"><span class="history-parity">${other ? (other === "odd" ? "홀" : "짝") : "?"}</span><small>${other ? (other === "odd" ? "ODD" : "EVEN") : "비공개"}</small></span></div><span class="badge ${badge?.[0] ?? "pending"}"><i class="led" aria-hidden="true"></i>${badge ? badge[1].split(" ")[0] : active ? "진행" : "대기"}</span><div class="tile-slot own-slot"><span class="record-tile ${own != null ? (own % 2 ? "odd" : "even") : "empty"}"><strong class="history-number">${own ?? "?"}</strong><small>${own != null ? (round?.myNumber != null || current?.myNumber != null && active ? "✓ 제출" : "선택됨·<br>미제출") : "미제출"}</small></span></div></li>`;
+      return `<li data-round="${i + 1}" class="history-cell ${active ? "active-round" : ""}" aria-label="${i + 1}라운드"><span class="round-label">R${i + 1}</span><div class="tile-slot opponent-slot"><span class="record-tile ${other ?? "empty"}"><span class="history-parity">${other ? (other === "odd" ? "홀" : "짝") : "?"}</span><small>${other ? (other === "odd" ? "홀수" : "짝수") : "비공개"}</small></span></div><span class="badge ${badge?.[0] ?? "pending"}"><i class="led" aria-hidden="true"></i>${badge ? badge[1].split(" ")[0] : active ? "진행" : "대기"}</span><div class="tile-slot own-slot"><span class="record-tile ${own != null ? (own % 2 ? "odd" : "even") : "empty"}"><strong class="history-number">${own ?? "?"}</strong><small>${own != null ? (round?.myNumber != null || current?.myNumber != null && active ? "✓ 제출" : "선택됨·<br>미제출") : "미제출"}</small></span></div></li>`;
     }).join("")}</ol><p class="legend">홀수 = 흰 타일 · 짝수 = 검은 타일 · 칸은 라운드 순서</p></section>`;
     const scores = `<div class="round-heading">ROUND <strong>${view.roundNo}</strong> / 9</div><div class="scores"><div>상대<strong>${view.opponentRoundWins}</strong></div><span>라운드 승수</span><div>나<strong>${view.myRoundWins}</strong></div></div>`;
     const lastResult = `<div id="lastResult" class="last-result ${result?.[0] ?? "pending"}" role="status" aria-live="polite">${result ? `직전 결과 · ${last.roundNo}라운드 · ${result[1]}` : "첫 라운드를 시작해 주세요"}</div>`;
