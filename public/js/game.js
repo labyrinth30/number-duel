@@ -5,7 +5,10 @@
   let state,
     ws,
     busy = false,
-    expired = false;
+    expired = false,
+    selected = null,
+    selectionKey = null,
+    syncSequence = 0;
   const escape = (value) =>
     String(value).replace(
       /[&<>"']/g,
@@ -20,12 +23,13 @@
     );
   const parity = (value) =>
     value
-      ? `<span class="parity ${value}">${value === "odd" ? "홀수 ODD · 파랑" : "짝수 EVEN · 노랑"}</span>`
-      : "미제출";
+      ? `<span class="parity ${value}">${value === "odd" ? "홀수 ODD" : "짝수 EVEN"}</span>`
+      : '<span class="parity unknown">? · 미제출</span>';
 
   async function action(path, body) {
     if (busy || expired) return;
     busy = true;
+    render();
     try {
       const response = await fetch(`${base}/api/rooms/${code}/${path}`, {
         method: "POST",
@@ -41,11 +45,13 @@
         "연결을 확인해 주세요";
     } finally {
       busy = false;
+      if (state) render();
     }
   }
 
   async function sync() {
     if (expired) return;
+    const sequence = ++syncSequence;
     try {
       const response = await fetch(`${base}/api/rooms/${code}/state`);
       if (response.status === 401) {
@@ -63,7 +69,9 @@
         }
         return;
       }
-      state = await response.json();
+      const next = await response.json();
+      if (sequence !== syncSequence) return;
+      state = next;
       render();
     } catch {
       document.getElementById("statusLine").textContent = "재연결 중…";
@@ -71,60 +79,67 @@
   }
 
   function render() {
+    const focused = document.activeElement;
+    const focusNumber = focused?.dataset?.n;
+    const focusId = focused?.id;
     const view = state.view;
+    el.className = state.seat === "A" ? "team-red" : "team-cyan";
     document.getElementById("statusLine").textContent =
       ws?.readyState === 1 ? "실시간 연결" : "HTTP 동기화";
     if (!view) {
       el.innerHTML = `<h2>로비 · ${escape(code)}</h2>
         <p>${state.players.map((player) => escape(player.nickname)).join(" / ")}</p>
         <p>초대 링크: <a id="invite" href="${escape(location.pathname)}">${escape(location.href)}</a></p>
-        ${state.seat === "A" && state.players.length === 2 ? '<button id="startBtn">게임 시작</button>' : "<p>상대 대기 중…</p>"}`;
+        ${state.seat === "A" && state.players.length === 2 ? '<button class="btn" id="startBtn">게임 시작</button>' : "<p>상대 대기 중…</p>"}`;
       document
         .getElementById("startBtn")
         ?.addEventListener("click", () => action("start", {}));
       return;
     }
-    document.getElementById("sidebar").textContent =
-      `라운드 승수 · 나 ${view.myRoundWins} : 상대 ${view.opponentRoundWins} · ${view.roundNo}/9 라운드`;
-    const remaining = `<p id="remaining">남은 숫자: ${view.myRemaining.join(", ") || "없음"}</p>`;
-    const history = `<ol id="history">${view.sets
-      .flatMap((set) => set.rounds)
-      .map(
-        (round) =>
-          `<li>${round.roundNo}라운드 · 내 숫자 ${round.myNumber ?? "미제출"} · 상대 ${parity(round.opponentParity)} · ${round.outcome === null ? "진행 중" : round.outcome === "DRAW" ? "무승부" : round.outcome === state.seat ? "승리" : "패배"}</li>`,
-      )
-      .join("")}</ol>`;
+    const key = `${state.gameId}:${view.roundNo}`;
+    const current = view.current;
+    if (selectionKey !== key || view.finished || current?.myNumber !== null) selected = null;
+    selectionKey = key;
+    if (selected !== null && !view.myRemaining.includes(selected)) selected = null;
+    const rounds = view.sets.flatMap((set) => set.rounds);
+    const outcome = (value) => value === "DRAW" ? ["draw", "무승부 DRAW"] : value === state.seat ? ["won", "승리 WIN"] : ["lost", "패배 LOSS"];
+    const last = rounds.filter((round) => round.outcome !== null).at(-1);
+    const result = last ? outcome(last.outcome) : null;
+    const history = `<section class="history-section" aria-label="라운드 순서 경기장"><div class="tray-heading"><h2>라운드 경기장</h2><span>상대 홀짝 ↑ · 내 숫자 ↓</span></div><ol id="history">${Array.from({length: 9}, (_, i) => {
+      const round = rounds.find((r) => r.roundNo === i + 1);
+      const active = !view.finished && view.roundNo === i + 1;
+      const own = round?.myNumber ?? (active ? current.myNumber ?? selected : null);
+      const other = round?.opponentParity ?? (active ? current.opponentParity : null);
+      const badge = round?.outcome != null ? outcome(round.outcome) : null;
+      return `<li data-round="${i + 1}" class="history-cell ${active ? "active-round" : ""}" aria-label="${i + 1}라운드"><span class="round-label">R${i + 1}</span><div class="tile-slot opponent-slot"><span class="record-tile ${other ?? "empty"}"><span class="history-parity">${other ? (other === "odd" ? "홀" : "짝") : "?"}</span><small>${other ? (other === "odd" ? "ODD" : "EVEN") : "비공개"}</small></span></div><span class="badge ${badge?.[0] ?? "pending"}"><i class="led" aria-hidden="true"></i>${badge ? badge[1].split(" ")[0] : active ? "진행" : "대기"}</span><div class="tile-slot own-slot"><span class="record-tile ${own != null ? (own % 2 ? "odd" : "even") : "empty"}"><strong class="history-number">${own ?? "?"}</strong><small>${own != null ? (round?.myNumber != null || current?.myNumber != null && active ? "✓ 제출" : "선택됨·<br>미제출") : "미제출"}</small></span></div></li>`;
+    }).join("")}</ol><p class="legend">홀수 = 흰 타일 · 짝수 = 검은 타일 · 칸은 라운드 순서</p></section>`;
+    const scores = `<div class="round-heading">ROUND <strong>${view.roundNo}</strong> / 9</div><div class="scores"><div>상대<strong>${view.opponentRoundWins}</strong></div><span>라운드 승수</span><div>나<strong>${view.myRoundWins}</strong></div></div>`;
+    const lastResult = `<div id="lastResult" class="last-result ${result?.[0] ?? "pending"}" role="status" aria-live="polite">${result ? `직전 결과 · ${last.roundNo}라운드 · ${result[1]}` : "첫 라운드를 시작해 주세요"}</div>`;
     if (view.finished) {
-      el.innerHTML = `<h2 id="result">${view.winner === null ? "무승부 DRAW" : view.winner === state.seat ? "🎉 승리" : "😢 패배"}</h2>
-        <p>라운드 승수 ${view.myRoundWins} : ${view.opponentRoundWins}</p>${remaining}
-        <button id="rematchBtn" ${state.rematch.mine ? "disabled" : ""}>${state.rematch.mine ? "재대결 동의 · 상대 대기" : "재대결"}</button>${history}`;
-      document.getElementById("rematchBtn").onclick = () =>
-        action("rematch", { gameId: state.gameId });
+      const match = view.winner === null ? ["draw", "무승부 DRAW"] : outcome(view.winner);
+      el.innerHTML = `${scores}<section class="match-result ${match[0]}"><p>최종 결과</p><h1 id="result" role="status" aria-live="polite">${match[1]}</h1><p>9라운드 완료</p></section>${lastResult}<button class="btn confirm" id="rematchBtn" ${state.rematch.mine || busy ? "disabled" : ""}>${state.rematch.mine ? "재대결 동의 완료 · 상대 대기" : "재대결 동의"}</button>${history}`;
+      document.getElementById("rematchBtn").onclick = () => action("rematch", { gameId: state.gameId });
       return;
     }
-    const current = view.current;
-    el.innerHTML = `<h2>숫자 하나 골라 제출</h2>${remaining}
-      ${
-        current.myNumber !== null
-          ? `<p>제출했어 (${current.myNumber}). 상대 대기 중...</p>`
-          : view.myRemaining
-              .map(
-                (number) =>
-                  `<button class="n-btn ${number % 2 ? "odd" : "even"}" data-n="${number}">${number} · ${number % 2 ? "홀수 ODD" : "짝수 EVEN"}</button>`,
-              )
-              .join("")
-      }
-      <p id="opponentParity">상대: ${parity(current.opponentParity)}</p>${history}`;
+    const submitted = current.myNumber !== null;
+    el.innerHTML = `${scores}<section class="arena" aria-label="현재 라운드"><div class="opponent"><span class="player-label">상대</span><div id="opponentParity" class="arena-value">${parity(current.opponentParity)}</div><p>${current.opponentParity ? "✓ 제출 완료" : "숫자 선택 중 · 미제출"}</p></div><span class="versus">VS</span><div class="self"><span class="player-label">나</span><div class="arena-value own-value">${submitted ? current.myNumber : selected ?? "?"}</div><p>${submitted ? "✓ 제출 완료 · 상대 대기" : selected !== null ? "선택됨·미제출" : "숫자를 선택해 주세요"}</p></div></section>${lastResult}<section class="selection"><h2>내 숫자 선택</h2><div class="number-grid">${Array.from({length:9},(_, i) => {
+      const number = i + 1, used = !view.myRemaining.includes(number);
+      return `<button class="n-btn ${number % 2 ? "odd" : "even"} ${selected === number ? "selected" : ""}" data-n="${number}" aria-pressed="${selected === number}" aria-label="${number}${used ? ' 사용 완료' : ' 선택'}" ${used || submitted || busy ? "disabled" : ""}><strong>${number}</strong><span>${used ? "사용 완료" : number % 2 ? "홀수" : "짝수"}</span></button>`;
+    }).join("")}</div><button id="confirmBtn" class="btn confirm" ${selected === null || submitted || busy ? "disabled" : ""}>${busy ? "제출 중…" : submitted ? "제출 완료 · 상대 대기" : selected !== null ? `${selected} 제출 확정` : "숫자 선택 후 제출 확정"}</button></section>${history}<details class="help"><summary>선택 도움말 ?</summary><p>숫자를 고른 뒤 제출 확정을 누르세요. 확정 전에는 바꿀 수 있습니다. 사용한 숫자는 다시 선택할 수 없습니다.</p></details>`;
     el.querySelectorAll(".n-btn").forEach((button) => {
-      button.onclick = () =>
-        action("submit", {
-          gameId: state.gameId,
-          setNo: String(view.setNo),
-          roundNo: String(view.roundNo),
-          requestId: crypto.randomUUID(),
-          number: button.dataset.n,
-        });
+      button.onclick = () => {
+        if (busy || submitted || !view.myRemaining.includes(Number(button.dataset.n))) return;
+        selected = Number(button.dataset.n);
+        render();
+        el.querySelector(`[data-n="${selected}"]`)?.focus();
+      };
     });
+    const restoreFocus = focusNumber ? el.querySelector(`[data-n="${focusNumber}"]`) : focusId ? document.getElementById(focusId) : null;
+    if (restoreFocus && !restoreFocus.disabled) restoreFocus.focus({ preventScroll: true });
+    document.getElementById("confirmBtn").onclick = () => {
+      if (selected === null || submitted || busy) return;
+      action("submit", { gameId: state.gameId, setNo: String(view.setNo), roundNo: String(view.roundNo), requestId: crypto.randomUUID(), number: String(selected) });
+    };
   }
 
   function connect() {

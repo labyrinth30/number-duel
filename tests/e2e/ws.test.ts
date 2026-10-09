@@ -1,5 +1,5 @@
 import { test } from "bun:test";
-import { mkdtempSync } from "fs";
+import { mkdtempSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { chromium, expect } from "@playwright/test";
@@ -57,6 +57,22 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
     await pa.locator("#startBtn").click();
     await pa.locator('[data-n="1"]').waitFor();
     await pb.locator('[data-n="1"]').waitFor();
+    await expect(pa.locator("#rules")).not.toHaveAttribute("open", "");
+    await expect(pa.locator("#confirmBtn")).toBeDisabled();
+    let submitPosts = 0;
+    pa.on("request", (req) => { if (req.method() === "POST" && req.url().endsWith("/submit")) submitPosts++; });
+    await pa.locator('[data-n="3"]').click();
+    await pa.locator('[data-n="2"]').click();
+    await pa.waitForTimeout(1800);
+    await expect(pa.locator('[data-n="2"]')).toHaveAttribute("aria-pressed", "true");
+    expect(submitPosts).toBe(0);
+    const selectConfirm = async (page: typeof pa, number: number) => {
+      await expect(page.locator(`[data-n="${number}"]`)).toBeEnabled();
+      await page.locator(`[data-n="${number}"]`).click();
+      const before = page === pa ? submitPosts : null;
+      await page.locator("#confirmBtn").evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
+      if (before !== null) await expect.poll(() => submitPosts).toBe(before + 1);
+    };
     const state = async (ctx: typeof a) =>
       await (
         await ctx.request.get(base + `/duel/api/rooms/${code}/state`)
@@ -237,14 +253,62 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
     expect((await state(b)).view.current.opponentParity).toBe("odd");
     await expect(pb.locator("#opponentParity")).toContainText("ODD");
     for (let r = 1; r <= 9; r++) {
-      if (r !== 1) await pa.locator(`[data-n="${aa[r - 1]}"]`).click();
-      await pb.locator(`[data-n="${bb[r - 1]}"]`).click();
+      if (r !== 1) await selectConfirm(pa, aa[r - 1]!);
+      await selectConfirm(pb, bb[r - 1]!);
       await expect
         .poll(async () => {
           const s = await state(a);
           return s.view.finished ? "finished" : String(s.view.roundNo);
         })
         .toBe(r === 9 ? "finished" : String(r + 1));
+      if (r < 9) {
+        await expect(pa.locator(`[data-n="${r}"]`)).toBeDisabled();
+        await expect(pa.locator("#confirmBtn")).toBeDisabled();
+        await expect(pa.locator(".n-btn[aria-pressed=\"true\"]")).toHaveCount(0);
+      }
+      await expect(pa.locator("#lastResult")).toContainText(`${r}라운드`);
+      if (r === 2) {
+        await pa.reload();
+        await expect(pa.locator("#lastResult")).toContainText("2라운드 · 승리");
+        await pa.locator('[data-n="3"]').click();
+        await expect(pa.locator('#history [data-round="1"]')).toContainText("ODD");
+        await expect(pa.locator('#history [data-round="2"]')).toContainText("ODD");
+        expect(await pa.locator('#history [data-round="1"] .history-number').textContent()).toBe("1");
+        expect(await pa.locator('#history [data-round="2"] .history-number').textContent()).toBe("2");
+        expect(await pa.locator(".opponent").textContent()).not.toMatch(/[1-9]/);
+        await expect(pa.locator("#history li")).toHaveCount(9);
+        await expect(pa.locator("#history .opponent-slot")).toHaveCount(9);
+        await expect(pa.locator("#history .own-slot")).toHaveCount(9);
+        await expect(pa.locator("#history .opponent-slot .history-number")).toHaveCount(0);
+        mkdirSync("backups/ui-review", { recursive: true });
+        for (const width of [360, 390, 1280]) {
+          await pa.setViewportSize({width, height: width === 1280 ? 900 : 844});
+          expect(await pa.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+          await pa.evaluate(() => scrollTo(0, 0));
+          for (const box of await pa.locator(".n-btn:not(:disabled), #confirmBtn, #rules summary").evaluateAll((elements) => elements.map((el) => ({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height})))) {
+            expect(box.width).toBeGreaterThanOrEqual(44);
+            expect(box.height).toBeGreaterThanOrEqual(44);
+          }
+          await expect(pa.locator("#confirmBtn")).toBeEnabled();
+          const geometry = await pa.evaluate(() => {
+            const confirm = document.getElementById("confirmBtn")!.getBoundingClientRect();
+            const selection = document.querySelector(".selection")!.getBoundingClientRect();
+            const history = document.querySelector(".history-section")!.getBoundingClientRect();
+            return {top: confirm.top, bottom: confirm.bottom, height: innerHeight, selectionBottom: selection.bottom, historyTop: history.top};
+          });
+          expect(geometry.top).toBeGreaterThanOrEqual(0);
+          expect(geometry.bottom).toBeLessThanOrEqual(geometry.height);
+          expect(geometry.selectionBottom).toBeLessThan(geometry.historyTop);
+          await expect(pa.locator("#history .active-round")).toHaveCount(1);
+          await expect(pa.locator("#history .active-round")).toContainText("선택됨·미제출");
+          await expect(pa.locator("#lastResult")).toContainText("직전 결과");
+          expect(await pa.locator(".scores div").allTextContents()).toEqual(["상대0", "나2"]);
+          await expect(pa.locator("#history .empty .history-number").first()).toHaveText("?");
+          await expect(pa.locator("#history .opponent-slot .empty").first()).toContainText("?");
+          await pa.screenshot({path: `backups/ui-review/round-3-${width}.png`});
+          await pa.screenshot({path: `backups/ui-review/round-3-${width}-full.png`, fullPage: true});
+        }
+      }
       if (r === 1) {
         const retry = await a.request.post(
           base + `/duel/api/rooms/${code}/submit`,
@@ -268,6 +332,12 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
     await pb.locator("#result").waitFor();
     expect(await pa.locator("#result").textContent()).toContain("승리");
     expect(await pb.locator("#result").textContent()).toContain("패배");
+    await pa.setViewportSize({width:1280,height:900});
+    await pa.evaluate(() => scrollTo(0, 0));
+    await pa.screenshot({path: "backups/ui-review/match-result-1280.png"});
+    await pa.setViewportSize({width:390,height:844});
+    await pa.screenshot({path: "backups/ui-review/match-result-390.png"});
+    await pa.screenshot({path: "backups/ui-review/match-result-390-full.png",fullPage:true});
     const end = await state(a);
     expect(end.roomStatus).toBe("FINISHED");
     expect(end.winnerPlayerId).toBeTruthy();
@@ -292,19 +362,22 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
     await pa.locator('[data-n="1"]').waitFor();
     await pb.reload();
     await pb.locator('[data-n="1"]').waitFor();
+    await expect(pa.locator("#confirmBtn")).toBeDisabled();
+    await expect(pa.locator('[data-n="1"]')).toBeEnabled();
+    await expect(pa.locator("#lastResult")).toContainText("첫 라운드");
     // Full equal-score draw match uses the same 1..9 sequence, over HTTP fallback.
     await b.routeWebSocket("**/duel/ws*", (ws) => ws.close());
     await pb.reload();
     const drawGameId = (await state(a)).gameId;
     for (let n = 1; n <= 9; n++) {
-      await pa.locator(`[data-n="${n}"]`).click();
+      await selectConfirm(pa, n);
       await expect
         .poll(async () => (await state(b)).view.current.opponentParity)
         .toBe(n % 2 ? "odd" : "even");
       await expect(pb.locator("#opponentParity")).toContainText(
         n % 2 ? "ODD" : "EVEN",
       );
-      await pb.locator(`[data-n="${n}"]`).click();
+      await selectConfirm(pb, n);
       await expect
         .poll(async () => {
           const s = await state(a);
@@ -327,7 +400,7 @@ test("isolated HTTP/WS security and two-browser full match, rematch, reload", as
     expect((await state(a)).gameId).toBe(drawGameId);
     await pb.locator("#rematchBtn").click();
     await expect.poll(async () => (await state(a)).gameId).not.toBe(drawGameId);
-    await pb.locator('[data-n="3"]').click();
+    await selectConfirm(pb, 3);
     await expect
       .poll(async () => (await state(b)).view.current.myNumber)
       .toBe(3);
