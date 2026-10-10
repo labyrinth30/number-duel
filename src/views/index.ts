@@ -29,6 +29,8 @@ export function homeView(): string {
     <input name="nickname" id="nick" placeholder="닉네임 (1~16자)" maxlength="16" required >
     <button class="btn" type="submit">방 만들기</button>
   </form>
+  <button class="btn" type="submit" form="mkroom" name="mode" value="AI">AI 대결 · 고급</button>
+  <p class="tag">딱 하나 난이도 (고급)</p>
   <div id="lobbyOut" style="margin-top:1.4em;"></div>
   <details style="margin-top:2em;">
     <summary>규칙 ?</summary>
@@ -44,7 +46,7 @@ export function homeView(): string {
       e.preventDefault();
       const nick = document.getElementById('nick').value.trim();
       if (!nick) return;
-      const r = await fetch('/duel/api/rooms', { method: 'POST', body: new URLSearchParams({ nickname: nick }) });
+      const r = await fetch('/duel/api/rooms', { method: 'POST', body: new URLSearchParams({ nickname: nick, ...(e.submitter?.value === 'AI' ? {mode:'AI', difficulty:'HARD'} : {}) }) });
       const j = await r.json();
       if (j.code) { window.location.href = '/duel/rooms/' + j.code; return; }
       else alert('오류: ' + (j.message || 'unknown'));
@@ -109,7 +111,7 @@ export function lobbyView(
 
 export function gameView(code: string, nicknames: string[]): string {
   return `<main id="app" class="wrap board">
-  <header class="topbar"><a href="/duel/" class="brand">NUMBER DUEL</a><details id="rules"><summary>규칙 ?</summary><div class="rules-content"><strong>9개의 숫자, 9라운드</strong><p>1~9를 한 번씩 사용합니다. 큰 숫자가 승리하지만 1은 9를 이깁니다. 같은 숫자는 무승부입니다.</p><p>첫 라운드는 누구나 먼저 제출할 수 있습니다. 이후에는 가장 최근 무승부가 아닌 라운드의 승자가 먼저 제출합니다. 모두 무승부라면 첫 라운드의 첫 제출자가 먼저입니다. 상대가 먼저 제출해야 하면 기다린 뒤 홀짝을 보고 제출하세요. 상대 숫자는 비공개이며 제출 후 홀짝만 공개됩니다. 9라운드 승수가 같으면 게임 무승부. 재대결은 두 사람 모두 동의해야 합니다.</p></div></details></header>
+  <header class="topbar"><a href="/duel/" class="brand">NUMBER DUEL</a><details id="rules"><summary>규칙 ?</summary><div class="rules-content"><strong>9개의 숫자, 9라운드</strong><p>1~9를 한 번씩 사용합니다. 큰 숫자가 승리하지만 1은 9를 이깁니다. 같은 숫자는 무승부입니다.</p><p>첫 라운드는 두 사람 대결에서 누구나, AI 대결에서 사람이 먼저 제출합니다. 이후에는 가장 최근 무승부가 아닌 라운드의 승자가 먼저 제출합니다. 모두 무승부라면 첫 라운드의 첫 제출자가 먼저입니다. 상대가 먼저 제출해야 하면 기다린 뒤 홀짝을 보고 제출하세요. 상대 숫자는 비공개이며 제출 후 홀짝만 공개됩니다. 9라운드 승수가 같으면 게임 무승부. 재대결은 두 사람 모두 동의해야 합니다.</p><p>AI 간단 설명: 고급 패턴 봇은 공개된 홀짝의 빈도와 반복·교대 패턴을 예측하며 가끔 다른 선택을 합니다. 상대의 정확한 숫자는 보지 않습니다. AI는 사람의 재대결 요청에 동의합니다.</p></div></details></header>
   <span id="statusLine" class="connection" role="status"></span>
   <div id="game"></div>
   <script src="/duel/static/js/game.js"></script>

@@ -57,7 +57,8 @@ export function rematchInTx(
       ).run(nextId, roomId, nextNo, "SELECTING", now);
       db.query(
         `REPLACE INTO game_state (game_id, snapshot, rematch_a, rematch_b) VALUES (?,?,0,0)`,
-      ).run(nextId, JSON.stringify(emptySnapshot()));
+      ).run(nextId, JSON.stringify({...emptySnapshot(), ...(db.query("SELECT 1 FROM ai_rooms WHERE room_id=?").get(roomId) ? {humanFirst:true} : {})}));
+      if (db.query("SELECT 1 FROM ai_rooms WHERE room_id=?").get(roomId)) db.query("INSERT INTO ai_games (game_id,seed) VALUES (?,?)").run(nextId, crypto.randomUUID());
       db.query("UPDATE rooms SET status='PLAYING',updated_at=? WHERE id=?").run(
         now,
         roomId,

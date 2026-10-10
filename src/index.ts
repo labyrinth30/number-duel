@@ -1,3 +1,4 @@
+import { tickAI } from "./jobs/ai.ts";
 import { createApp, authenticate } from "./app.ts";
 import { config } from "./config/env.ts";
 import { openDb, migrate } from "./db/client.ts";
@@ -124,6 +125,9 @@ const server = Bun.serve<Data>({
     },
   },
 });
+setInterval(() => {
+  try { tickAI(db, broadcast); } catch (e) { console.error("AI task failed", e instanceof ApiError ? e.code : "INTERNAL"); }
+}, 50).unref();
 setInterval(() => {
   try {
     cleanupStaleRooms(db);

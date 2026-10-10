@@ -13,7 +13,7 @@ export function makeWsHandlers(db: Database) {
       const room = db.query(`SELECT id FROM rooms WHERE invite_code=?`).get(data.roomCode) as { id: string } | undefined;
       if (!room) return null;
       const p = db.query(`SELECT id, room_id, seat FROM players WHERE session_token_hash=?`).get(hash) as { id: string; room_id: string; seat: "A" | "B" } | undefined;
-      if (!p || p.room_id !== room.id) return null;
+      if (!p || p.room_id !== room.id || (p.seat === "B" && db.query("SELECT 1 FROM ai_rooms WHERE room_id=?").get(room.id))) return null;
       return { roomId: room.id, playerId: p.id, seat: p.seat };
     },
     add(ws: any, d: WsData) {

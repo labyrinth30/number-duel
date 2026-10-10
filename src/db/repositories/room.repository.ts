@@ -89,6 +89,14 @@ export class RoomRepository {
     };
   }
 
+  isAI(roomId: string): boolean {
+    return !!this.db.query("SELECT 1 FROM ai_rooms WHERE room_id=?").get(roomId);
+  }
+  addAI(roomId: string): void {
+    this.db.query("INSERT INTO ai_rooms VALUES (?, 'HARD')").run(roomId);
+    this.db.query("INSERT INTO players VALUES (?,?,?,?,?,?)").run(newPlayerId(), roomId, "패턴 봇", "B", "bot:" + crypto.randomUUID(), Date.now());
+    this.updateStatus(roomId, "READY");
+  }
   byInvite(code: string): RoomRow | null {
     return this.db
       .query(`SELECT * FROM rooms WHERE invite_code = ?`)
@@ -211,9 +219,10 @@ export class RoomRepository {
           .query(
             `REPLACE INTO game_state (game_id, snapshot, rematch_a, rematch_b) VALUES (?,?,0,0)`,
           )
-          .run(id, JSON.stringify(emptySnapshot()));
+          .run(id, JSON.stringify({...emptySnapshot(), ...(this.isAI(roomId) ? {humanFirst:true} : {})}));
+        if (this.isAI(roomId)) this.db.query("INSERT INTO ai_games (game_id,seed) VALUES (?,?)").run(id, crypto.randomUUID());
         this.db
-          .query(`UPDATE rooms SET status='PLAYING', updated_at=? WHERE id=?`)
+          .query(`UPDATE rooms SET status='PLAYING' , updated_at=? WHERE id=?`)
           .run(now, roomId);
         return this.db
           .query(`SELECT * FROM games WHERE id=?`)

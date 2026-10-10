@@ -77,6 +77,14 @@ export function migrate(db: Database): void {
   CREATE INDEX IF NOT EXISTS idx_rounds_game ON rounds(game_id);
   CREATE INDEX IF NOT EXISTS idx_players_room ON players(room_id);
   `);
+  db.exec(`CREATE TABLE IF NOT EXISTS ai_rooms (
+    room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
+    difficulty TEXT NOT NULL CHECK(difficulty='HARD')
+  );
+  CREATE TABLE IF NOT EXISTS ai_games (
+    game_id TEXT PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+    seed TEXT NOT NULL, pending_round INTEGER, due_at INTEGER
+  );`);
   const columns = db.query("PRAGMA table_info(game_state)").all() as { name: string }[];
   if (!columns.some((column) => column.name === "initial_first_submitter"))
     db.exec("ALTER TABLE game_state ADD COLUMN initial_first_submitter TEXT CHECK(initial_first_submitter IN ('A','B'))");

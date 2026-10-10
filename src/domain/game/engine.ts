@@ -22,6 +22,7 @@ export interface SetState {
 }
 export interface GameSnapshot {
   initialFirstSubmitter?: Seat | null;
+  humanFirst?: boolean;
   sets: SetState[];
   finished: boolean;
   winner: Seat | null;
@@ -40,7 +41,7 @@ export function submissionOrder(snapshot: GameSnapshot, seat: Seat) {
   const decisive = resolved.findLast((r) => r.outcome === "A" || r.outcome === "B");
   const requiredFirstSeat: Seat | null = decisive
     ? decisive.outcome as Seat
-    : resolved.length ? snapshot.initialFirstSubmitter ?? null : null;
+    : resolved.length ? snapshot.initialFirstSubmitter ?? null : snapshot.humanFirst ? "A" : null;
   const migrationBlocked = resolved.length > 0 && !decisive && !requiredFirstSeat;
   const open = rounds.at(-1)?.outcome === null ? rounds.at(-1)! : null;
   const submitted = open ? (seat === "A" ? open.aNumber : open.bNumber) !== null : false;

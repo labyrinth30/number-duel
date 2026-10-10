@@ -30,7 +30,7 @@ export function authenticate(db: Database, roomId: string, cookie: string) {
     const p = repo
       .players(roomId)
       .find((p) => p.session_token_hash === hashToken(value.join("=")));
-    if (p) return p;
+    if (p && !(p.seat === "B" && repo.isAI(roomId))) return p;
   }
   return null;
 }
@@ -102,11 +102,16 @@ export function createApp(
     );
   }
   app.post("/api/rooms", async (c) => {
-    const n = nick((await c.req.parseBody()).nickname);
+    const body = await c.req.parseBody();
+    const n = nick(body.nickname);
     const out = db
       .transaction(() => {
         const o = rooms.create();
         rooms.setNickname(o.host.id, n);
+        if (body.mode === "AI") {
+          if (body.difficulty !== "HARD") throw new ApiError(400,"BAD_DIFFICULTY","BAD_DIFFICULTY");
+          rooms.addAI(o.room.id);
+        }
         return o;
       })
       .immediate();
@@ -138,10 +143,11 @@ export function createApp(
       : null;
     return c.json({
       roomStatus: r.status,
+      ai: rooms.isAI(r.id) ? {difficulty:"HARD", label:"딱 하나 난이도 (고급)"} : null,
       seat: p.seat,
       players: rooms
         .players(r.id)
-        .map((p) => ({ seat: p.seat, nickname: p.nickname })),
+        .map((p) => ({ seat: p.seat, nickname: p.nickname, bot: p.seat === "B" && rooms.isAI(r.id) })),
       gameId: g?.game.id ?? null,
       winnerPlayerId: g?.game.winner_player_id ?? null,
       rematch: flags

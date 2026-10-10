@@ -88,8 +88,8 @@
       ws?.readyState === 1 ? "실시간 연결" : "HTTP 동기화";
     if (!view) {
       el.innerHTML = `<h2>로비 · ${escape(code)}</h2>
-        <p>${state.players.map((player) => escape(player.nickname)).join(" / ")}</p>
-        <p>초대 링크: <a id="invite" href="${escape(location.pathname)}">${escape(location.href)}</a></p>
+        <p>${state.players.map((player) => escape(player.nickname) + (player.bot ? " · BOT · 고급" : "")).join(" / ")}</p>
+        ${state.ai ? "<p>딱 하나 난이도 (고급) · AI 대결</p>" : `<p>초대 링크: <a id="invite" href="${escape(location.pathname)}">${escape(location.href)}</a></p>`}
         ${state.seat === "A" && state.players.length === 2 ? '<button class="btn" id="startBtn">게임 시작</button>' : "<p>상대 대기 중…</p>"}`;
       document
         .getElementById("startBtn")
@@ -124,7 +124,7 @@
     const submitted = current.myNumber !== null;
     const waiting = !view.canSubmit && !submitted;
     const waitText = view.turnStatus === "MIGRATION_REQUIRED" ? "첫 제출 기록이 없어 운영자 확인이 필요합니다. 기록은 보존됩니다." : rounds.some((round) => round.outcome === "A" || round.outcome === "B") ? "직전 승자의 선제출을 기다리는 중입니다. 무승부는 이전 순서를 유지합니다." : "첫 라운드의 첫 제출자가 먼저 제출할 때까지 기다려 주세요.";
-    el.innerHTML = `${scores}<section class="arena" aria-label="현재 라운드"><div class="opponent"><span class="player-label">상대</span><div id="opponentParity" class="arena-value">${parity(current.opponentParity)}</div><p>${current.opponentParity ? "✓ 제출 완료" : "숫자 선택 중 · 미제출"}</p></div><span class="versus">VS</span><div class="self"><span class="player-label">나</span><div class="arena-value own-value">${submitted ? current.myNumber : selected ?? "?"}</div><p>${submitted ? "✓ 제출 완료 · 상대 대기" : selected !== null ? "선택됨·미제출" : "숫자를 선택해 주세요"}</p></div></section>${lastResult}${waiting ? `<p id="turnWaiting" role="status">${waitText}</p>` : ""}<section class="selection"><h2>내 숫자 선택</h2><div class="number-grid">${Array.from({length:9},(_, i) => {
+    el.innerHTML = `${scores}<section class="arena" aria-label="현재 라운드"><div class="opponent"><span class="player-label">${state.ai ? "BOT · 패턴 봇 · 고급" : "상대"}</span><div id="opponentParity" class="arena-value">${parity(current.opponentParity)}</div><p>${current.opponentParity ? "✓ 제출 완료" : state.ai ? (waiting || submitted ? "AI 제출 대기 중 · 미제출" : "사람의 선제출 대기 · 미제출") : "숫자 선택 중 · 미제출"}</p></div><span class="versus">VS</span><div class="self"><span class="player-label">나</span><div class="arena-value own-value">${submitted ? current.myNumber : selected ?? "?"}</div><p>${submitted ? "✓ 제출 완료 · 상대 대기" : selected !== null ? "선택됨·미제출" : "숫자를 선택해 주세요"}</p></div></section>${lastResult}${waiting ? `<p id="turnWaiting" role="status">${waitText}</p>` : ""}<section class="selection"><h2>내 숫자 선택</h2><div class="number-grid">${Array.from({length:9},(_, i) => {
       const number = i + 1, used = !view.myRemaining.includes(number);
       return `<button class="n-btn ${number % 2 ? "odd" : "even"} ${selected === number ? "selected" : ""}" data-n="${number}" aria-pressed="${selected === number}" aria-label="${number}${used ? ' 사용 완료' : ' 선택'}" ${used || submitted || waiting || busy ? "disabled" : ""}><strong>${number}</strong><span>${used ? "사용 완료" : number % 2 ? "홀수" : "짝수"}</span></button>`;
     }).join("")}</div><button id="confirmBtn" class="btn confirm" ${selected === null || submitted || waiting || busy ? "disabled" : ""}>${waiting ? "선제출 대기 중" : busy ? "제출 중…" : submitted ? "제출 완료 · 상대 대기" : selected !== null ? `${selected} 제출 확정` : "숫자 선택 후 제출 확정"}</button></section>${history}<details class="help"><summary>선택 도움말 ?</summary><p>숫자를 고른 뒤 제출 확정을 누르세요. 확정 전에는 바꿀 수 있습니다. 사용한 숫자는 다시 선택할 수 없습니다.</p></details>`;

@@ -27,3 +27,9 @@ Source backup before this correction: `backups/owner-nine-round-20261009/source-
 Submission order: round 1 is free; the first server-accepted submission atomically persists `initialFirstSubmitter` in the snapshot and additive SQLite `game_state.initial_first_submitter` column. From round 2, the nearest prior resolved non-DRAW winner submits first. Draws carry that winner across any number of draws; if every resolved round drew, the original first submitter goes first. The other player waits until that required first submission is accepted, then sees parity and may submit. Matching accepted request-ID retries remain successful before turn checks; stale new requests fail without changing state. Both-consent rematches reset this field and free round 1.
 
 Legacy single-set games with decisive history derive order from the nearest decisive winner. Empty games record the first acceptance naturally. Draw-only legacy history without a saved initial submitter is preserved and blocked with `LEGACY_SUBMISSION_ORDER_UNKNOWN` / `MIGRATION_REQUIRED`, requiring owner migration review; no order or history is guessed. Parent read-only inspection found 16 active games: six empty, ten with decisive history, no draw-only or partially submitted first rounds.
+
+### AI 대결 (고급만)
+
+로비의 **AI 대결 · 고급**은 딱 하나 난이도 (고급)를 제공합니다. 공개 홀짝의 빈도/조건부 패턴을 학습하는 서버 봇이며, 정확한 상대 숫자는 보지 않습니다. 첫 라운드는 사람 선제출, 이후 기존 승자 선제출 규칙을 따릅니다. 서버의 50ms 작업은 저장된 시드와 800~1500ms 제출 기한을 사용해 재시작 후에도 미완료 턴을 이어갑니다. `ai_rooms`, `ai_games`는 기존 플레이어 스키마를 바꾸지 않는 추가 테이블입니다. 시드와 제출 기한은 API에 포함되지 않습니다. 재대결은 사람 요청 후 봇 동의를 별도로 기록합니다. 게임 내 접힌 규칙 도움말에 AI 간단 설명이 있습니다.
+
+AI 검증: `bun test tests/unit/ai.test.ts tests/integration/ai.test.ts tests/e2e/ai.test.ts`. 모든 서버 테스트는 임시 DB와 로컬 임시 포트를 사용합니다. 검토 스크린샷은 `backups/ai-review/`에 있습니다.
