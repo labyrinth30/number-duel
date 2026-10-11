@@ -107,35 +107,6 @@ test("production cookies are secure, hashed in DB; bounded bodies; errors do not
   }
 });
 
-test("legacy multi-set unfinished snapshots are blocked without rewriting state", () => {
-  const { db, repo, room, g } = fixture();
-  const snap = JSON.parse(
-    (
-      db.query("SELECT snapshot FROM game_state WHERE game_id=?").get(g.id) as {
-        snapshot: string;
-      }
-    ).snapshot,
-  );
-  snap.sets.push({ ...snap.sets[0], setNo: 2 });
-  const original = JSON.stringify(snap);
-  db.query("UPDATE game_state SET snapshot=? WHERE game_id=?").run(
-    original,
-    g.id,
-  );
-  expect(() => repo.activeGame(room.id)).toThrow("LEGACY_GAME_INCOMPATIBLE");
-  expect(() => submitInTx(db, g.id, "A", 1)).toThrow(
-    "LEGACY_GAME_INCOMPATIBLE",
-  );
-  expect(
-    (
-      db.query("SELECT snapshot FROM game_state WHERE game_id=?").get(g.id) as {
-        snapshot: string;
-      }
-    ).snapshot,
-  ).toBe(original);
-  db.close();
-});
-
 test("HTTP Origin, authorization, cache policy and rate limits", async () => {
   const { db, room, host, g } = fixture();
   const app = createApp(db);

@@ -9,7 +9,6 @@ import {
   ApiError,
 } from "../../utils/errors.ts";
 import {
-  isIncompatibleLegacy,
   emptySnapshot,
   type GameSnapshot,
 } from "../../domain/game/engine.ts";
@@ -179,12 +178,6 @@ export class RoomRepository {
     } | null;
     const snap = gs ? JSON.parse(gs.snapshot) : null;
     if (snap) snap.initialFirstSubmitter ??= gs?.initial_first_submitter ?? null;
-    if (snap && isIncompatibleLegacy(snap))
-      throw new ApiError(
-        409,
-        "LEGACY_GAME_INCOMPATIBLE",
-        "LEGACY_GAME_INCOMPATIBLE",
-      );
     return { game: g, snapshot: snap, stateVersion: g.state_version } as any;
   }
   createGame(roomId: string): GameRow {

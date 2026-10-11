@@ -67,22 +67,6 @@ test("nearest winner survives multiple draws; order changes B then A; old accept
   expect(getPlayerView("B",JSON.parse(saved().snapshot),10).canSubmit).toBe(false);
   db.close();
 });
-test("additive migration is repeatable; unknown legacy draw order preserved, decisive legacy continues", () => {
-  const {db,g,saved}=fixture();
-  submitInTx(db,g.id,"B",1); submitInTx(db,g.id,"A",1);
-  const snap=JSON.parse(saved().snapshot); delete snap.initialFirstSubmitter;
-  db.query("UPDATE game_state SET snapshot=?,initial_first_submitter=NULL WHERE game_id=?").run(JSON.stringify(snap),g.id);
-  const before=saved(); migrate(db); migrate(db);
-  expect(getPlayerView("A",snap,2)).toMatchObject({canSubmit:false,turnStatus:"MIGRATION_REQUIRED"});
-  expect(() => submitInTx(db,g.id,"A",2)).toThrow("LEGACY_SUBMISSION_ORDER_UNKNOWN");
-  expect(saved()).toEqual(before);
-  snap.sets[0].rounds[0].outcome="B"; snap.sets[0].bScore=1;
-  db.query("UPDATE game_state SET snapshot=? WHERE game_id=?").run(JSON.stringify(snap),g.id);
-  expect(() => submitInTx(db,g.id,"A",2)).toThrow("WAITING_FIRST_SUBMISSION");
-  submitInTx(db,g.id,"B",2); submitInTx(db,g.id,"A",2);
-  expect(saved().initial_first_submitter).toBeNull();
-  db.close();
-});
 test("simultaneous independent processes serialize first acceptance and required order without lost updates", async () => {
   const {db,path,g,saved}=fixture();
   const launch=(seat:Seat,number:number) => Bun.spawn(["/home/ubuntu/.bun/bin/bun","-e",`import {openDb} from './src/db/client.ts'; import {submitInTx} from './src/db/repositories/game.repository.ts'; const db=openDb(${JSON.stringify(path)}); try {submitInTx(db,${JSON.stringify(g.id)},${JSON.stringify(seat)},${number}); console.log('ACCEPTED');} catch(e) {console.log(e.code ?? e.message);} finally {db.close();}`],{stdout:"pipe",stderr:"pipe"});

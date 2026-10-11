@@ -41,14 +41,17 @@ export function submissionOrder(snapshot: GameSnapshot, seat: Seat) {
   const decisive = resolved.findLast((r) => r.outcome === "A" || r.outcome === "B");
   const requiredFirstSeat: Seat | null = decisive
     ? decisive.outcome as Seat
-    : resolved.length ? snapshot.initialFirstSubmitter ?? null : snapshot.humanFirst ? "A" : null;
-  const migrationBlocked = resolved.length > 0 && !decisive && !requiredFirstSeat;
+    : resolved.length
+      ? snapshot.initialFirstSubmitter ?? null
+      : snapshot.humanFirst
+        ? "A"
+        : null;
   const open = rounds.at(-1)?.outcome === null ? rounds.at(-1)! : null;
   const submitted = open ? (seat === "A" ? open.aNumber : open.bNumber) !== null : false;
   const firstSubmitted = requiredFirstSeat === "A" ? open?.aNumber != null : requiredFirstSeat === "B" ? open?.bNumber != null : false;
-  const canSubmit = !snapshot.finished && !migrationBlocked && !submitted &&
+  const canSubmit = !snapshot.finished && !submitted &&
     (!requiredFirstSeat || requiredFirstSeat === seat || firstSubmitted);
-  const turnStatus = snapshot.finished ? "FINISHED" : migrationBlocked ? "MIGRATION_REQUIRED" : submitted ? "SUBMITTED" : canSubmit ? "READY" : "WAITING_FIRST";
+  const turnStatus = snapshot.finished ? "FINISHED" : submitted ? "SUBMITTED" : canSubmit ? "READY" : "WAITING_FIRST";
   return { requiredFirstSeat, canSubmit, turnStatus };
 }
 
@@ -107,8 +110,6 @@ export function validateMove(input: MoveInput): MoveCheck | MoveError {
     };
   }
   const order = submissionOrder(snapshot, seat);
-  if (order.turnStatus === "MIGRATION_REQUIRED")
-    return { ok: false, code: "LEGACY_SUBMISSION_ORDER_UNKNOWN", message: "Original first submitter is unknown; owner migration review required." };
   if (!order.canSubmit)
     return { ok: false, code: "WAITING_FIRST_SUBMISSION", message: "Wait for the prior winner to submit first." };
   return { ok: true, setNo: curSet.setNo, roundNo };
@@ -235,18 +236,6 @@ export function resolveIfBoth(snapshot: GameSnapshot): void {
     snapshot.finished = true;
     snapshot.winner = set.winner === "DRAW" ? null : set.winner;
   }
-}
-
-/** Unfinished legacy multi-set games require owner review; never rewrite them. */
-export function isIncompatibleLegacy(snapshot: GameSnapshot): boolean {
-  return (
-    !snapshot.finished &&
-    (snapshot.sets.length !== 1 ||
-      snapshot.sets[0]?.setNo !== 1 ||
-      (snapshot.sets[0]?.rounds.length >= ROUNDS_PER_GAME &&
-        snapshot.sets[0]?.rounds.at(-1)?.outcome !== null) ||
-      !!snapshot.sets[0]?.winner)
-  );
 }
 
 export type Parity = "odd" | "even";

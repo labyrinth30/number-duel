@@ -20,11 +20,7 @@ export function authenticate(db: Database, roomId: string, cookie: string) {
   for (const part of cookie.split(";")) {
     const [key, ...value] = part.trim().split("=");
     if (
-      !["A", "B"].some(
-        (seat) =>
-          key === `nd_${seat}_${roomId}` ||
-          key === `nd_${seat}_${roomId.slice(0, 6)}`,
-      )
+      !["A", "B"].some((seat) => key === `nd_${seat}_${roomId}`)
     )
       continue;
     const p = repo

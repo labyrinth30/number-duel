@@ -1,7 +1,6 @@
 // 终端 기능 심화: applyRematch transaction — 양쪽 동의 → 새 게임
 import type { Database } from "bun:sqlite";
 import {
-  isIncompatibleLegacy,
   emptySnapshot,
   type GameSnapshot,
 } from "../../domain/game/engine.ts";
@@ -31,12 +30,6 @@ export function rematchInTx(
     } | null;
     if (!st) throw new ApiError(500, "NO_GAME_STATE", "corrupt");
     const snap: GameSnapshot = JSON.parse(st.snapshot);
-    if (isIncompatibleLegacy(snap))
-      throw new ApiError(
-        409,
-        "LEGACY_GAME_INCOMPATIBLE",
-        "LEGACY_GAME_INCOMPATIBLE",
-      );
     if (!snap.finished)
       throw new ApiError(409, "GAME_IN_PROGRESS", "아직 진행 중");
     const a = seat === "A" ? 1 : st.rematch_a;

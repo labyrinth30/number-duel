@@ -1,6 +1,5 @@
 import type { Database } from "bun:sqlite";
 import {
-  isIncompatibleLegacy,
   recordNumber,
   resolveIfBoth,
   validateMove,
@@ -49,12 +48,6 @@ export function submitInTx(
         .get(gameId) as { snapshot: string; initial_first_submitter: Seat | null };
       const snap: GameSnapshot = JSON.parse(row.snapshot);
       snap.initialFirstSubmitter ??= row.initial_first_submitter;
-      if (isIncompatibleLegacy(snap))
-        throw new ApiError(
-          409,
-          "LEGACY_GAME_INCOMPATIBLE",
-          "LEGACY_GAME_INCOMPATIBLE",
-        );
       if (identity) {
         const prior = db
           .query(
